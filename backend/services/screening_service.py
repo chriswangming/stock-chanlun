@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from chanlun.elements import BuySellPoint
 from core.chanlun_analysis import SCREENING_KLINE_LIMIT, run_analysis
 from core.kline_serialize import analysis_klines_to_df
-from services.akshare_service import (
+from services.futu_hk_service import (
     get_daily_hot_stocks,
     get_realtime_quote,
     get_stock_boards_em,

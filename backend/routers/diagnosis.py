@@ -16,7 +16,7 @@ from config import DEEPSEEK_MODEL_ID
 from core.chanlun_analysis import run_analysis
 from core.datetime_fmt import format_date_short
 from deps import check_ai_diagnosis_rate_limits, client_ip
-from services.akshare_service import get_stock_info, normalize_stock_code
+from services.futu_hk_service import get_stock_info, normalize_stock_code
 
 router = APIRouter()
 log = logging.getLogger(__name__)

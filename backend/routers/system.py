@@ -7,6 +7,7 @@ from config import SCREENING_WORKERS
 from stores.local_json import load_settings, save_settings
 from ai.chat_sessions import chat_session_stats
 from services.akshare_service import akshare_cache_stats
+from services.futu_hk_service import futu_cache_stats
 from utils import (
     ai_signal_llm_cache,
     ai_signal_rule_cache,
@@ -38,6 +39,7 @@ def health_check():
             "sector_board": sector_board_cache.stats(),
             "stock_news": stock_news_cache.stats(),
             "akshare": akshare_cache_stats(),
+            "futu": futu_cache_stats(),
         },
         "rate_limiters": {
             "chanlun_global_remaining": chanlun_global_limiter.get_remaining("global"),
