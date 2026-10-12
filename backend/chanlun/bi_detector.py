@@ -263,28 +263,5 @@ class BiDetector:
 
     # ── 输出转换 ────────────────────────────────────────────
     def _to_models(self) -> list[Bi]:
-        out: list[Bi] = []
-        for bi in self._bis:
-            begin_klu: RawBar = bi.get_begin_klu()
-            end_klu: RawBar = bi.get_end_klu()
-            direction = "up" if bi.is_up() else "down"
-            out.append(
-                Bi(
-                    id=f"bi_{'up' if direction == 'up' else 'down'}_{len(out) + 1}",
-                    start=begin_klu.date,
-                    end=end_klu.date,
-                    direction=direction,
-                    high=float(bi._high()),
-                    low=float(bi._low()),
-                    start_price=float(bi.get_begin_val()),
-                    end_price=float(bi.get_end_val()),
-                    is_sure=bool(bi.is_sure),
-                    used_to_be_sure=bool(bi.used_to_be_sure),
-                    # 端点所在的原始K线下标：买卖点算力度（MACD 面积/峰值）时需要
-                    start_idx=int(begin_klu.idx),
-                    end_idx=int(end_klu.idx),
-                    klc_start_idx=int(bi.begin_klc.lst[0].idx),
-                    klc_end_idx=int(bi.end_klc.lst[-1].idx),
-                )
-            )
-        return out
+        """内部 CBi -> 对外 Bi；字段映射规则集中在 CBi.to_model()。"""
+        return [bi.to_model(seq=i + 1) for i, bi in enumerate(self._bis)]

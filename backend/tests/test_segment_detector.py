@@ -8,7 +8,8 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from chanlun.elements import Bi
-from chanlun.segment_detector import SegmentDetector, CZS, build_lines
+from chanlun.base import CZS, build_lines
+from chanlun.segment_detector import SegmentDetector
 
 
 class SegmentDetectorTests(unittest.TestCase):
