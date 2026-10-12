@@ -28,7 +28,7 @@ class NormalizeCodeTests(unittest.TestCase):
         self.assertEqual(f(" 09927 "), "09927")
         self.assertEqual(f("009927"), "09927")
         self.assertEqual(f(""), "")
-        self.assertEqual(f("BTCUSDT"), "BTCUSDT")  # 非纯数字原样保留
+        self.assertEqual(f("AAPL"), "AAPL")  # 非纯数字原样保留
 
     def test_write_and_read_roundtrip(self):
         """写入与读取必须用同一套归一化，否则磁盘上会出现同一只股票的两个键。"""
