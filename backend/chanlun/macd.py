@@ -70,30 +70,6 @@ class MACDSeries:
             bars_out.append(2 * (dif - dea))
         return cls(difs, deas, bars_out, vols, _calc_rsi(closes, rsi_period))
 
-    @classmethod
-    def from_closes(cls, closes: Sequence[float], volumes: Optional[Sequence[float]] = None,
-                    fast: int = 12, slow: int = 26, signal: int = 9,
-                    rsi_period: int = 14) -> "MACDSeries":
-        difs: list[float] = []
-        deas: list[float] = []
-        bars_out: list[float] = []
-        fast_ema = slow_ema = dea = 0.0
-        for i, close in enumerate(closes):
-            close = float(close or 0.0)
-            if i == 0:
-                fast_ema = slow_ema = close
-                dif = dea = 0.0
-            else:
-                fast_ema = (2 * close + (fast - 1) * fast_ema) / (fast + 1)
-                slow_ema = (2 * close + (slow - 1) * slow_ema) / (slow + 1)
-                dif = fast_ema - slow_ema
-                dea = (2 * dif + (signal - 1) * dea) / (signal + 1)
-            difs.append(dif)
-            deas.append(dea)
-            bars_out.append(2 * (dif - dea))
-        return cls(difs, deas, bars_out, list(volumes) if volumes else [],
-                   _calc_rsi(closes, rsi_period))
-
 
 def _calc_rsi(closes: Sequence[float], period: int = 14) -> list[float]:
     """chan.py Math/RSI.py 的实现（逐根推进版）。"""
