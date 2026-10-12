@@ -468,8 +468,10 @@ def _rate_confidence(rate) -> float:
     return 0.6
 
 
-def _has_overlap(l1: float, h1: float, l2: float, h2: float, equal: bool = False) -> bool:
-    return (h2 >= l1 and h1 >= l2) if equal else (h2 > l1 and h1 > l2)
+# [冗余-已注释] B1: 与 base.has_overlap 逐字重复，改用 base 版本（见下方 import）
+# def _has_overlap(l1: float, h1: float, l2: float, h2: float, equal: bool = False) -> bool:
+#     return (h2 >= l1 and h1 >= l2) if equal else (h2 > l1 and h1 > l2)
+from .base import has_overlap as _has_overlap  # noqa: E402  (B1: 复用 base 实现)
 
 
 def _bsp2s_break_bsp1(bsp2s_bi, bsp2_break_bi) -> bool:

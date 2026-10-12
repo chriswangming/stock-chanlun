@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+# [冗余-已注释] 随 A1(_as_datetime) 一起失去用途：本模块已无 datetime 引用
+# from datetime import datetime
 from typing import Optional
 
 import pandas as pd
@@ -24,10 +25,11 @@ from .elements import Bi
 from .fenxing_detector import Fenxing, FenxingDetector
 
 
-def _as_datetime(d) -> datetime:
-    if hasattr(d, "to_pydatetime"):
-        return d.to_pydatetime()
-    return d
+# [冗余-已注释] 与 fenxing_detector._as_datetime 逐字重复，本模块从未调用
+# def _as_datetime(d) -> datetime:
+#     if hasattr(d, "to_pydatetime"):
+#         return d.to_pydatetime()
+#     return d
 
 
 class BiDetector:
@@ -57,14 +59,16 @@ class BiDetector:
         """包含处理后的合并K线序列。"""
         return self._merged
 
-    @property
-    def processed_klines(self) -> pd.DataFrame:
-        return self._fenxing_detector.klines
+    # [冗余-已注释] D1: 生产代码无引用，仅 test_engine 用到
+    # @property
+    # def processed_klines(self) -> pd.DataFrame:
+    #     return self._fenxing_detector.klines
 
-    @property
-    def bis_internal(self) -> list[CBi]:
-        """内部笔对象（供线段/中枢模块消费，带 pre/next 与所属括线信息）。"""
-        return self._bis
+    # [冗余-已注释] A2: 零引用（线段模块改用 SegmentDetector.lines 拿内部笔序列）
+    # @property
+    # def bis_internal(self) -> list[CBi]:
+    #     """内部笔对象（供线段/中枢模块消费，带 pre/next 与所属括线信息）。"""
+    #     return self._bis
 
     @property
     def raw_bars(self) -> list[RawBar]:

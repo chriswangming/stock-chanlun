@@ -294,7 +294,8 @@ class CBi:
         self.pre: Optional["CBi"] = None
         self.next: Optional["CBi"] = None
         self.parent_seg = None
-        self.sure_end: list[MergedKLine] = []
+        # [冗余-已注释] A5: sure_end 只写不读，全项目无任何消费点
+        # self.sure_end: list[MergedKLine] = []
         if not self.check_ok():
             raise ValueError("bi direction and begin/end value mismatch")
 
@@ -339,9 +340,10 @@ class CBi:
 
     def update_virtual_end(self, new_klc: MergedKLine):
         """延长为虚笔：保留原确认终点以便回退，并把本笔标记为未确认。"""
-        self.sure_end.append(self.end_klc)
+        # [冗余-已注释] A5: 见 __init__ 里的 sure_end，只写不读
+        # self.sure_end.append(self.end_klc)
         if not self.update_new_end(new_klc):
-            self.sure_end.pop()
+            # self.sure_end.pop()
             return False
         self.used_to_be_sure = self.is_sure
         self.is_sure = False

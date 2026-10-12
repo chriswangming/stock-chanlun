@@ -30,10 +30,11 @@ class ChanlunEngineKlinesTests(unittest.TestCase):
         result = ChanlunEngine(raw).analyze(level="daily")
         self.assertEqual(len(result.klines), len(raw))
 
-    def test_processed_klines_fewer_than_raw_after_inclusion(self):
-        raw = _sample_df()
-        processed = BiDetector(raw).processed_klines
-        self.assertLess(len(processed), len(raw))
+    # [冗余-已注释] D1: BiDetector.processed_klines 已注释（生产代码无引用）
+    # def test_processed_klines_fewer_than_raw_after_inclusion(self):
+    #     raw = _sample_df()
+    #     processed = BiDetector(raw).processed_klines
+    #     self.assertLess(len(processed), len(raw))
 
     def test_merged_klines_cover_all_raw_bars(self):
         """合并K线必须首尾相接、无缝覆盖全部原始K线（前端据此画区间框）。"""

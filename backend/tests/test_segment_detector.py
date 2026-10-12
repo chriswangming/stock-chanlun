@@ -126,14 +126,15 @@ class SegmentDetectorTests(unittest.TestCase):
         for zs in zs_list:
             self.assertLess(zs.range_low, zs.range_high)
 
-    def test_get_zhongshu_for_price_returns_latest_matching_zone(self):
-        detector = SegmentDetector(bis=self._overlapping_bis())
-        detector.detect_segments()
-        zs_list = detector.detect_zhongshus()
-        self.assertTrue(zs_list)
-        hit = SegmentDetector.get_zhongshu_for_price(zs_list, zs_list[0].range_low)
-        self.assertIsNotNone(hit)
-        self.assertIsNone(SegmentDetector.get_zhongshu_for_price(zs_list, 9999.0))
+    # [冗余-已注释] D2: SegmentDetector.get_zhongshu_for_price 已注释（生产代码无引用）
+    # def test_get_zhongshu_for_price_returns_latest_matching_zone(self):
+    #     detector = SegmentDetector(bis=self._overlapping_bis())
+    #     detector.detect_segments()
+    #     zs_list = detector.detect_zhongshus()
+    #     self.assertTrue(zs_list)
+    #     hit = SegmentDetector.get_zhongshu_for_price(zs_list, zs_list[0].range_low)
+    #     self.assertIsNotNone(hit)
+    #     self.assertIsNone(SegmentDetector.get_zhongshu_for_price(zs_list, 9999.0))
 
     # ── CZS 原语 ────────────────────────────────────────────
     def test_czs_range_and_peak_tracking(self):

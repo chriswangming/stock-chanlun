@@ -58,7 +58,7 @@ class ChanlunEngine:
         segments = seg_detector.detect_segments()
         zhongshus = seg_detector.detect_zhongshus(segments)
 
-        # 5. 买卖点判定（chan.py BuySellPoint 口径，需要笔序列 + 段内中枢 + 力度）
+        # 4. 买卖点判定（chan.py BuySellPoint 口径，需要笔序列 + 段内中枢 + 力度）
         sig_detector = SignalDetector(
             bis, segments, zhongshus, level=level,
             config=self.config.bsp,
@@ -69,10 +69,10 @@ class ChanlunEngine:
         signals = sig_detector.detect_all()
         trend = sig_detector.detect_trend()
 
-        # 6. K 线对象：API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
+        # 5. K 线对象：API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
         kline_objects = self._to_klines()
 
-        # 5b. 支撑阻力位
+        # 6. 支撑阻力位
         klines_dict = [{"date": k.date, "high": k.high, "low": k.low} for k in kline_objects]
         support_resistance = sig_detector.detect_support_resistance(klines_dict, signals)
 

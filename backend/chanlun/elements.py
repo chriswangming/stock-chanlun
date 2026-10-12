@@ -97,19 +97,21 @@ class Zhongshu(BaseModel):
     level: int = 2
 
 
-class MACDData(BaseModel):
-    """MACD指标数据"""
-    dif: float
-    dea: float
-    bar: float  # MACD柱 = (dif - dea) * 2
+# [冗余-已注释] A7: 旧实现遗留模型，零引用（力度/背驰已改由 chanlun/macd.py 计算）
+# class MACDData(BaseModel):
+#     """MACD指标数据"""
+#     dif: float
+#     dea: float
+#     bar: float  # MACD柱 = (dif - dea) * 2
 
 
-class PowerMetrics(BaseModel):
-    """力度指标（用于背驰判断）"""
-    macd_area: float      # 同向段MACD面积
-    price_change: float    # 价格变化幅度
-    slope: float           # 均线斜率
-    rsi: Optional[float] = None
+# [冗余-已注释] A7: 同上，零引用
+# class PowerMetrics(BaseModel):
+#     """力度指标（用于背驰判断）"""
+#     macd_area: float      # 同向段MACD面积
+#     price_change: float    # 价格变化幅度
+#     slope: float           # 均线斜率
+#     rsi: Optional[float] = None
 
 
 class BuySellPoint(BaseModel):
@@ -152,13 +154,14 @@ class ChanlunAnalysis(BaseModel):
     merged_klines: list[MergedKLineInfo] = []
 
 
-class StockInfo(BaseModel):
-    """股票基本信息"""
-    code: str
-    name: str
-    exchange: str       # 上交所/深交所
-    industry: Optional[str] = None
-    market_cap: Optional[float] = None  # 总市值(万)
+# [冗余-已注释] A8: 零引用（股票基本信息走 services 层的行情结构）
+# class StockInfo(BaseModel):
+#     """股票基本信息"""
+#     code: str
+#     name: str
+#     exchange: str       # 上交所/深交所
+#     industry: Optional[str] = None
+#     market_cap: Optional[float] = None  # 总市值(万)
 
 
 class AiSignal(BaseModel):

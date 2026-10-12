@@ -154,7 +154,8 @@ class CSeg:
         self.next: Optional[CSeg] = None
         self.bi_list: list[Line] = []
         self.reason = reason
-        self.ele_inside_is_sure = False
+        # [冗余-已注释] C3: 该字段无处赋 True，update_zs_in_seg 里的判读恒不触发
+        # self.ele_inside_is_sure = False
         if end_bi.idx - start_bi.idx < 2:
             self.is_sure = False
 
@@ -711,8 +712,9 @@ def cal_seg(bi_list: list[Line], seg_list: SegListComm):
     bi_idx = len(bi_list) - 1
     while bi_idx >= 0:
         bi = bi_list[bi_idx]
-        if bi.seg_idx is not None and bi.idx < -1:  # 批处理无增量，恒不触发
-            break
+        # [冗余-已注释] C2: bi.idx 恒 >= 0，该条件永不成立（chan.py 流式增量残留）
+        # if bi.seg_idx is not None and bi.idx < -1:  # 批处理无增量，恒不触发
+        #     break
         if bi.idx > cur_seg.end_bi.idx:
             bi.seg_idx = cur_seg.idx + 1
             bi_idx -= 1
@@ -752,8 +754,9 @@ class CZS:
             return
         self.begin_bi = lst[0]
         self.end_bi = lst[-1]
-        for item in lst:
-            item.parent_seg = item.parent_seg  # noqa - 保持引用
+        # [冗余-已注释] C1: 自赋值空操作，无任何副作用
+        # for item in lst:
+        #     item.parent_seg = item.parent_seg  # noqa - 保持引用
         self._update_range(lst)
         self.peak_high = float("-inf")
         self.peak_low = float("inf")
@@ -789,8 +792,9 @@ class CZS:
     def get_bi_in(self):
         return self.bi_in
 
-    def get_bi_out(self):
-        return self.bi_out
+    # [冗余-已注释] A3: 零引用（外部直接读 zs.bi_out 属性）
+    # def get_bi_out(self):
+    #     return self.bi_out
 
     def end_bi_break(self, end_bi=None) -> bool:
         """出中枢笔是否突破中枢区间。"""
@@ -1034,8 +1038,9 @@ def update_zs_in_seg(bi_lst: list[Line], seg_lst: SegListComm, zs_list: CZSList)
     seg_idx = len(seg_lst) - 1
     while seg_idx >= 0:
         seg = seg_lst[seg_idx]
-        if seg.ele_inside_is_sure:
-            break
+        # [冗余-已注释] C3: ele_inside_is_sure 无处赋 True（流式残留），该分支永不触发
+        # if seg.ele_inside_is_sure:
+        #     break
         seg.clear_zs_lst()
         _zs_idx = len(zs_list.zs_lst) - 1
         while _zs_idx >= 0:
@@ -1083,9 +1088,10 @@ class SegmentDetector:
     def seg_list(self) -> Optional[SegListComm]:
         return self._seg_list
 
-    @property
-    def zs_list(self) -> Optional[CZSList]:
-        return self._zs_list
+    # [冗余-已注释] A4: 零引用（engine 只用 lines / seg_list）
+    # @property
+    # def zs_list(self) -> Optional[CZSList]:
+    #     return self._zs_list
 
     # ── 线段 ─────────────────────────────────────
     def detect_segments(self, algo: Optional[str] = None, **_deprecated) -> list[XianSegment]:
@@ -1173,10 +1179,11 @@ class SegmentDetector:
         return out
 
     # ── 其它 ─────────────────────────────────────
-    @staticmethod
-    def get_zhongshu_for_price(zhongshus: list[Zhongshu], price: float):
-        """找到价格所在的中枢（取最近的一个）。"""
-        for zs in reversed(zhongshus):
-            if zs.range_low <= price <= zs.range_high:
-                return zs
-        return None
+    # [冗余-已注释] D2: 生产代码无引用，仅 test_segment_detector 用到
+    # @staticmethod
+    # def get_zhongshu_for_price(zhongshus: list[Zhongshu], price: float):
+    #     """找到价格所在的中枢（取最近的一个）。"""
+    #     for zs in reversed(zhongshus):
+    #         if zs.range_low <= price <= zs.range_high:
+    #             return zs
+    #     return None
