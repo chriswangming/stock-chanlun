@@ -8,6 +8,8 @@ import {
   GraphicComponent,
   GridComponent,
   TooltipComponent,
+  // 未注册时 markLine 会被静默忽略：RSI/SKDJ 阈值线、MACD 0 轴都依赖它
+  MarkLineComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
@@ -19,6 +21,7 @@ echarts.use([
   TooltipComponent,
   DataZoomComponent,
   GraphicComponent,
+  MarkLineComponent,
   CanvasRenderer,
 ])
 

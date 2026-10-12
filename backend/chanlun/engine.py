@@ -4,7 +4,7 @@
 import pandas as pd
 from datetime import datetime
 from .elements import (
-    KLine, Bi, XiangSegment, Zhongshu, BuySellPoint,
+    KLine, Bi, XianSegment, Zhongshu, BuySellPoint,
     ChanlunAnalysis
 )
 from .bi_detector import BiDetector
@@ -72,7 +72,7 @@ class ChanlunEngine:
             level=level,
             klines=kline_objects,
             bis=bis,
-            xiangs=segments,
+            xians=segments,
             zhongshus=zhongshus,
             signals=signals,
             trend=trend,

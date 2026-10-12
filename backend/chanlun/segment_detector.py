@@ -3,7 +3,7 @@
 """
 from typing import Optional
 from datetime import datetime
-from .elements import Bi, XiangSegment, Zhongshu
+from .elements import Bi, XianSegment, Zhongshu
 
 
 class SegmentDetector:
@@ -19,12 +19,12 @@ class SegmentDetector:
     def __init__(self, bis: list[Bi]):
         self.bis = bis
 
-    def detect_segments(self, min_overlap_bis: int = 3, max_iterations: int = 10000) -> list[XiangSegment]:
+    def detect_segments(self, min_overlap_bis: int = 3, max_iterations: int = 10000) -> list[XianSegment]:
         """检测线段"""
         if len(self.bis) < 3:
             return []
 
-        segments: list[XiangSegment] = []
+        segments: list[XianSegment] = []
         i = 0
         iterations = 0
 
@@ -66,8 +66,8 @@ class SegmentDetector:
                                 end_price = next_b.end_price
                                 extended = True
 
-                segments.append(XiangSegment(
-                    id=f"xiang_{len(segments)+1}",
+                segments.append(XianSegment(
+                    id=f"xian_{len(segments)+1}",
                     start=start,
                     end=end,
                     direction=direction,
@@ -96,7 +96,7 @@ class SegmentDetector:
         """判断笔是否与已有区域重叠"""
         return bi.high > existing_low and bi.low < existing_high
 
-    def detect_zhongshus(self, segments: list[XiangSegment]) -> list[Zhongshu]:
+    def detect_zhongshus(self, segments: list[XianSegment]) -> list[Zhongshu]:
         """
         检测中枢（滑动窗口算法）：
         遍历线段序列，每取得连续3段计算重叠区间：
@@ -121,7 +121,7 @@ class SegmentDetector:
                 # 重叠 → 形成中枢，尝试向后延伸
                 cur_start = group[0].start
                 cur_end = group[-1].end
-                xiang_ids = [s.id for s in group]
+                xian_ids = [s.id for s in group]
                 extend_idx = i + 3
 
                 while extend_idx < len(segments):
@@ -131,7 +131,7 @@ class SegmentDetector:
                         range_high = min(range_high, nxt.high)
                         range_low = max(range_low, nxt.low)
                         cur_end = nxt.end
-                        xiang_ids.append(nxt.id)
+                        xian_ids.append(nxt.id)
                         extend_idx += 1
                     else:
                         break
@@ -142,7 +142,7 @@ class SegmentDetector:
                     end=cur_end,
                     range_high=float(range_high),
                     range_low=float(range_low),
-                    xiang_ids=xiang_ids,
+                    xian_ids=xian_ids,
                     level=group[0].level
                 ))
                 i = extend_idx  # 跳到中枢结束后的第一个线段

@@ -38,7 +38,7 @@ describe('chartOverlayCore', () => {
       signals: [],
       flags: {
         bis: true,
-        xiangs: false,
+        xians: false,
         zhongshus: false,
         signals: false,
         aiLines: false,

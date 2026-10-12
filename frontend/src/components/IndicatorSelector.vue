@@ -58,8 +58,8 @@
             <label class="indicator-item">
               <input
                 type="checkbox"
-                :checked="indicators.xiangs"
-                @change="store.toggleIndicator('xiangs')"
+                :checked="indicators.xians"
+                @change="store.toggleIndicator('xians')"
               />
               <span class="indicator-dot" style="background: linear-gradient(90deg, #ffe066, #ff9f7f)"></span>
               <span>线段</span>

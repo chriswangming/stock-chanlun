@@ -19,11 +19,7 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis) -> dict:
         for k in result.klines
     ]
     period = level_to_period(result.level)
-    data_period_note = (
-        "5min"
-        if result.level == "1min"
-        else period
-    )
+    data_period_note = "5min" if result.level == "1min" else period
     return {
         "stock_code": result.stock_code,
         "level": result.level,
@@ -45,7 +41,7 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis) -> dict:
             }
             for b in result.bis
         ],
-        "xiangs": [
+        "xians": [
             {
                 "id": s.id,
                 "start": str(s.start)[:19],
@@ -56,7 +52,7 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis) -> dict:
                 "start_price": s.start_price,
                 "end_price": s.end_price,
             }
-            for s in result.xiangs
+            for s in result.xians
         ],
         "zhongshus": [
             {

@@ -1,7 +1,7 @@
 /**
  * 缠论 ECharts graphic 叠加层 — PC / 移动端共用（索引映射 + 像素渲染）。
  */
-import type { KLine, Bi, XiangSegment, Zhongshu, Signal, AISignal, SupportResistance } from '../api/stock'
+import type { KLine, Bi, XianSegment, Zhongshu, Signal, AISignal, SupportResistance } from '../api/stock'
 import { buildDateLookup, dateToIdxRobust, resolveBarRange } from './chartDateUtils'
 import { simplifySupportResistanceLevels } from './chartOverlayUtils'
 
@@ -12,7 +12,7 @@ export type IndexedSignal = Signal & { _idx: number }
 
 export type ChanlunOverlayPayload = {
   bis: IndexedRange<Bi>[]
-  xiangs: IndexedRange<XiangSegment>[]
+  xians: IndexedRange<XianSegment>[]
   zhongshus: IndexedRange<Zhongshu>[]
   signals: IndexedSignal[]
   aiSignal: AISignal | null | undefined
@@ -23,7 +23,7 @@ export type ChanlunOverlayPayload = {
 
 export type ChanlunOverlayFlags = {
   bis: boolean
-  xiangs: boolean
+  xians: boolean
   zhongshus: boolean
   signals: boolean
   aiLines: boolean
@@ -106,7 +106,7 @@ export function buildChanlunOverlayCache(params: {
   dates: string[]
   seriesKlines: KLine[]
   bis: Bi[]
-  xiangs?: XiangSegment[]
+  xians?: XianSegment[]
   zhongshus: Zhongshu[]
   signals: Signal[]
   aiSignal?: AISignal | null
@@ -118,7 +118,7 @@ export function buildChanlunOverlayCache(params: {
     dates,
     seriesKlines,
     bis,
-    xiangs,
+    xians,
     zhongshus,
     signals,
     aiSignal,
@@ -135,7 +135,7 @@ export function buildChanlunOverlayCache(params: {
       const r = resolveBarRange(b.start, b.end, nBar, dates, dateLookup)
       return r ? [{ ...b, _s: r[0], _e: r[1] }] : []
     }) : [],
-    xiangs: flags.xiangs && xiangs ? xiangs.flatMap(x => {
+    xians: flags.xians && xians ? xians.flatMap(x => {
       const r = resolveBarRange(x.start, x.end, nBar, dates, dateLookup)
       return r ? [{ ...x, _s: r[0], _e: r[1] }] : []
     }) : [],
@@ -172,7 +172,7 @@ export function buildChanlunGraphicChildren(ctx: {
   const priceAt = ctx.priceAtIdx ?? (() => 0)
   const children: GraphicElement[] = []
 
-  const { bis, xiangs, zhongshus, signals, aiSignal, supportResistance, dualCrossIndices } = data
+  const { bis, xians, zhongshus, signals, aiSignal, supportResistance, dualCrossIndices } = data
 
   for (const zs of zhongshus) {
     if (zs._e < viewS || zs._s > viewE || zs._e < zs._s) continue
@@ -247,7 +247,7 @@ export function buildChanlunGraphicChildren(ctx: {
     })
   }
 
-  for (const xiang of xiangs) {
+  for (const xiang of xians) {
     if (xiang._e < viewS || xiang._s > viewE || xiang._e < xiang._s) continue
     const p1 = pixelAtIdxCached(
       xiang._s,

@@ -2,7 +2,7 @@
 走势自动分类 — 上涨/下跌/盘整
 """
 import pandas as pd
-from chanlun.elements import XiangSegment, Zhongshu
+from chanlun.elements import XianSegment, Zhongshu
 
 
 class WaveClassifier:
@@ -13,7 +13,7 @@ class WaveClassifier:
     - 盘整: 中枢震荡，无明确方向
     """
 
-    def classify(self, segments: list[XiangSegment],
+    def classify(self, segments: list[XianSegment],
                  zhongshus: list[Zhongshu],
                  current_price: float) -> dict:
         """

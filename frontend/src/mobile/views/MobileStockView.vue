@@ -26,7 +26,7 @@
         <MobileKLineChart
           :klines="store.klines"
           :bis="store.chanlunResult?.bis || []"
-          :xiangs="store.chanlunResult?.xiangs || []"
+          :xians="store.chanlunResult?.xians || []"
           :zhongshus="store.chanlunResult?.zhongshus || []"
           :signals="store.chanlunResult?.signals || []"
           :ai-signal="store.aiSignal"

@@ -77,6 +77,7 @@ class FenxingDetector:
                 out_vol.append(float(volumes[i]))
                 continue
 
+            # 处理K线的包含关系
             before_h = out_high[-2] if len(out_high) >= 2 else prev_h
             before_l = out_low[-2] if len(out_low) >= 2 else prev_l
             direction = merge_direction(prev_h, prev_l, before_h, before_l, cur_h, cur_l)

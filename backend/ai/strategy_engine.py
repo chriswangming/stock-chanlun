@@ -2,7 +2,7 @@
 策略推荐引擎
 """
 from typing import Optional
-from chanlun.elements import BuySellPoint, XiangSegment, Zhongshu, ASignal
+from chanlun.elements import BuySellPoint, XianSegment, Zhongshu, AiSignal
 
 
 class StrategyEngine:
@@ -26,7 +26,7 @@ class StrategyEngine:
         self.zhongshus = zhongshus
         self.divergence = divergence
 
-    def generate_signal(self) -> ASignal:
+    def generate_signal(self) -> AiSignal:
         """生成AI策略信号"""
         buy_signals = [s for s in self.signals if '买' in s.type]
         sell_signals = [s for s in self.signals if '卖' in s.type]
@@ -67,7 +67,7 @@ class StrategyEngine:
         # 自然语言描述
         desc = self._make_description(active_signal, direction, confidence)
 
-        return ASignal(
+        return AiSignal(
             stock_code="",
             level=self.current_level,
             direction=direction,

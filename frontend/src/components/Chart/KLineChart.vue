@@ -37,11 +37,12 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import echarts from '../../utils/echarts'
-import type { KLine, Bi, XiangSegment, Zhongshu, Signal, AISignal, SupportResistance } from '../../api/stock'
+import type { KLine, Bi, XianSegment, Zhongshu, Signal, AISignal, SupportResistance } from '../../api/stock'
 import type { IndicatorConfig } from '../../stores/chanlun'
 import { calcMA, computeDualMacdSkdjMarkerIndices } from '../../utils/stockIndicators'
 import { downsampleKlines, klineSeriesSignature } from '../../utils/chartDownsample'
 import { setChartOptionKeepDataZoom } from '../../utils/chartEchartsHelpers'
+import { formatAxisLabel, formatStamp, normTs } from '../../utils/chartDateUtils'
 import { useDebouncedCallback } from '../../composables/useDebounce'
 import { useKlineIndicators } from '../../composables/useKlineIndicators'
 import {
@@ -57,7 +58,7 @@ const props = defineProps<{
   bis: Bi[]
   zhongshus: Zhongshu[]
   signals: Signal[]
-  xiangs?: XiangSegment[]
+  xians?: XianSegment[]
   aiSignal?: AISignal | null
   supportResistance?: SupportResistance[]
   indicators?: IndicatorConfig
@@ -76,7 +77,7 @@ const klineIndicators = useKlineIndicators(displayKlines)
 function getIndicators(): Required<IndicatorConfig> {
   return {
     ma5: true, ma20: true, ma60: true,
-    bis: true, xiangs: false, zhongshus: true, signals: true, aiLines: true,
+    bis: true, xians: false, zhongshus: true, signals: true, aiLines: true,
     supportResistance: true,
     volume: true, macd: true, rsi: true, skdj: true,
     ...(props.indicators || {})
@@ -135,7 +136,7 @@ function formatBarLine(idx: number): string {
   const series = displayKlines.value
   if (idx < 0 || idx >= series.length) return ''
   const k = series[idx]
-  const d = lastDates[idx] ?? k.date.slice(0, 10)
+  const d = formatStamp(lastDates[idx] ?? k.date)
   return `${d}  开盘 ${fmtPrice(k.open)}  收盘 ${fmtPrice(k.close)}  最高 ${fmtPrice(k.high)}  最低 ${fmtPrice(k.low)}  |  MA5 ${fmtPrice(lastMa5[idx])}  MA20 ${fmtPrice(lastMa20[idx])}  MA60 ${fmtPrice(lastMa60[idx])}`
 }
 
@@ -148,7 +149,9 @@ function setBarInfoByIndex(idx: number) {
 
 function buildOption() {
   const seriesKlines = displayKlines.value
-  const dates = seriesKlines.map(k => k.date.slice(0, 10))
+  // 轴类目必须用完整时间戳：分钟级周期同一天有多根 bar，只取日期会出现重复类目，
+  // convertToPixel 与缠论索引都会定位错。
+  const dates = seriesKlines.map(k => normTs(k.date))
   const ohlc = seriesKlines.map(k => [k.open, k.close, k.low, k.high])
   const closes = seriesKlines.map(k => k.close)
   const ind = getIndicators()
@@ -199,7 +202,10 @@ function buildOption() {
     boundaryGap: true,
     axisLine: { lineStyle: { color: '#30363d' } },
     axisTick: { show: false },
-    axisLabel: { color: '#7d8590', fontSize: 10, interval: 'auto' as const, show: subs.length === 0 },
+    axisLabel: {
+      color: '#7d8590', fontSize: 10, interval: 'auto' as const, show: subs.length === 0,
+      formatter: (v: string) => formatAxisLabel(v),
+    },
     splitLine: { show: false },
   })
   yAxes.push({
@@ -228,7 +234,10 @@ function buildOption() {
       boundaryGap: true,
       axisLine: { lineStyle: { color: '#30363d' } },
       axisTick: { show: false },
-      axisLabel: { show: isLastSub, color: '#7d8590', fontSize: 9, interval: 'auto' as const },
+      axisLabel: {
+        show: isLastSub, color: '#7d8590', fontSize: 9, interval: 'auto' as const,
+        formatter: (v: string) => formatAxisLabel(v),
+      },
       splitLine: { show: false },
     })
 
@@ -275,10 +284,13 @@ function buildOption() {
         axisLabel: { color: '#7d8590', fontSize: 9 },
       })
       seriesList.push(
-        { name: 'DIF', type: 'line', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: dif, lineStyle: { color: '#58a6ff', width: 1 }, showSymbol: false },
+        { name: 'DIF', type: 'line', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: dif, lineStyle: { color: '#58a6ff', width: 1 }, showSymbol: false,
+          markLine: { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#7d8590', width: 1, opacity: 0.55 }, data: [{ yAxis: 0 }] } },
         { name: 'DEA', type: 'line', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: dea, lineStyle: { color: '#d29922', width: 1 }, showSymbol: false },
-        { name: 'MACD', type: 'bar', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: bar.map(v => (v >= 0 ? v : 0)), itemStyle: { color: COLOR_UP }, barMaxWidth: 4 },
-        { name: 'MACDneg', type: 'bar', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: bar.map(v => (v < 0 ? Math.abs(v) : 0)), itemStyle: { color: COLOR_DOWN }, barMaxWidth: 4 },
+        // 正负分两条 series 只为上色：负值必须保持负号，否则会被画到 0 轴上方。
+        // 两条同 stack 才会落在同一槽位（不 stack 时 ECharts 会把它们并排错开）。
+        { name: 'MACD', type: 'bar', stack: 'macd', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: bar.map(v => (v >= 0 ? v : 0)), itemStyle: { color: COLOR_UP }, barMaxWidth: 4 },
+        { name: 'MACDneg', type: 'bar', stack: 'macd', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: bar.map(v => (v < 0 ? v : 0)), itemStyle: { color: COLOR_DOWN }, barMaxWidth: 4 },
       )
     } else if (key === 'rsi') {
       const rsi = indData.rsi
@@ -412,7 +424,7 @@ function buildOption() {
         const idx = first.dataIndex
         if (idx == null || idx < 0 || idx >= seriesKlines.length) return ''
         const k = seriesKlines[idx]
-        const d = k.date.slice(0, 10)
+        const d = formatStamp(k.date)
         const change = k.close >= k.open
         const changeColor = change ? '#3fb950' : '#f85149'
         const changePct = k.open > 0 ? ((k.close - k.open) / k.open * 100) : 0
@@ -575,7 +587,7 @@ function updateOverlayOnly() {
 /** 仅刷新缠论叠加缓存与 graphic，不重建 K 线/均线 series */
 function syncChanlunOverlayCache() {
   const seriesKlines = displayKlines.value
-  const dates = seriesKlines.map(k => k.date.slice(0, 10))
+  const dates = seriesKlines.map(k => normTs(k.date))
   const ind = getIndicators()
   const indData = klineIndicators.value
 
@@ -593,14 +605,14 @@ function syncChanlunOverlayCache() {
     dates,
     seriesKlines,
     bis: props.bis,
-    xiangs: props.xiangs,
+    xians: props.xians,
     zhongshus: props.zhongshus,
     signals: props.signals,
     aiSignal: props.aiSignal,
     supportResistance: props.supportResistance,
     flags: {
       bis: ind.bis,
-      xiangs: ind.xiangs,
+      xians: ind.xians,
       zhongshus: ind.zhongshus,
       signals: ind.signals,
       aiLines: ind.aiLines,
@@ -668,7 +680,7 @@ watch(
 )
 
 watch(
-  () => [props.bis, props.zhongshus, props.signals, props.xiangs, props.aiSignal, props.supportResistance],
+  () => [props.bis, props.zhongshus, props.signals, props.xians, props.aiSignal, props.supportResistance],
   updateOverlayOnly,
   { deep: true }
 )
@@ -677,7 +689,7 @@ watch(
 watch(
   () => [
     props.indicators?.bis,
-    props.indicators?.xiangs,
+    props.indicators?.xians,
     props.indicators?.zhongshus,
     props.indicators?.signals,
     props.indicators?.aiLines,

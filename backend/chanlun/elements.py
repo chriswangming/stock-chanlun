@@ -26,7 +26,7 @@ class Bi(BaseModel):
     end_price: float   # 笔终点价格
 
 
-class XiangSegment(BaseModel):
+class XianSegment(BaseModel):
     """线段 — 由笔构成"""
     id: str
     start: datetime
@@ -47,7 +47,7 @@ class Zhongshu(BaseModel):
     end: datetime
     range_high: float  # 中枢区间最高价
     range_low: float   # 中枢区间最低价
-    xiang_ids: list[str]  # 构成该中枢的线段ID
+    xian_ids: list[str]  # 构成该中枢的线段ID
     level: int
 
 
@@ -96,7 +96,7 @@ class ChanlunAnalysis(BaseModel):
     level: str
     klines: list[KLine]
     bis: list[Bi]
-    xiangs: list[XiangSegment]
+    xians: list[XianSegment]
     zhongshus: list[Zhongshu]
     signals: list[BuySellPoint]
     trend: Literal["上涨", "下跌", "盘整", "未知"]
@@ -113,7 +113,7 @@ class StockInfo(BaseModel):
     market_cap: Optional[float] = None  # 总市值(万)
 
 
-class ASignal(BaseModel):
+class AiSignal(BaseModel):
     """AI策略信号"""
     stock_code: str
     level: str

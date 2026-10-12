@@ -65,7 +65,7 @@ class SignalDetectorTests(unittest.TestCase):
             end=self.t0 + timedelta(minutes=30),
             range_high=100.0,
             range_low=95.0,
-            xiang_ids=["x1", "x2", "x3"],
+            xian_ids=["x1", "x2", "x3"],
             level=2,
         )
         latest = Zhongshu(
@@ -74,7 +74,7 @@ class SignalDetectorTests(unittest.TestCase):
             end=self.t0 + timedelta(minutes=60),
             range_high=110.0,
             range_low=106.0,
-            xiang_ids=["x4", "x5", "x6"],
+            xian_ids=["x4", "x5", "x6"],
             level=2,
         )
 

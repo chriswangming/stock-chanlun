@@ -3,15 +3,14 @@
 """
 from typing import Optional, Literal
 from datetime import datetime
-from .elements import Bi, XiangSegment, Zhongshu, BuySellPoint, SupportResistanceLevel
+from .elements import Bi, XianSegment, Zhongshu, BuySellPoint, SupportResistanceLevel
 
 
 class SignalDetector:
     """
     三类买卖点判定:
 
-    一买(1st Buy): 下跌趋势背驰点
-      → 最后一个下跌段终点，价格新低但力度不创新低
+    一买(1st Buy): 下跌趋势背驰点 → 最后一个下跌段终点，价格新低但力度不创新低
     二买(2nd Buy): 一买后回调低点（不破一买前低）
     三买(3rd Buy): 突破中枢后回踩，不跌入中枢
 
@@ -19,7 +18,7 @@ class SignalDetector:
     """
 
     def __init__(self, bis: list[Bi],
-                 segments: list[XiangSegment],
+                 segments: list[XianSegment],
                  zhongshus: list[Zhongshu],
                  level: str = "daily"):
         self.bis = bis
@@ -323,8 +322,8 @@ class SignalDetector:
                 ))
 
         # ── 3. 线段 ─────────────────────────────
-        recent_xiangs = self.segments[-6:]
-        for x in recent_xiangs:
+        recent_xians = self.segments[-6:]
+        for x in recent_xians:
             if x.direction == "down":
                 levels.append(SupportResistanceLevel(
                     type="support",

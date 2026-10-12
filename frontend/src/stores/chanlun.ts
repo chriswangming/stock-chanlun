@@ -12,7 +12,7 @@ export interface IndicatorConfig {
   ma20: boolean
   ma60: boolean
   bis: boolean
-  xiangs: boolean
+  xians: boolean
   zhongshus: boolean
   signals: boolean
   aiLines: boolean
@@ -30,7 +30,7 @@ export const defaultIndicators: IndicatorConfig = {
   ma60: true,
   bis: true,
   /** 默认关闭线段，避免与「笔」叠两层折线导致杂乱；需要时在指标面板打开 */
-  xiangs: false,
+  xians: false,
   zhongshus: true,
   signals: true,
   aiLines: true,

@@ -102,7 +102,7 @@ const mainInds = [
 
 const chanlunInds = [
   { key: 'bis' as const, label: '笔', dotStyle: { background: 'linear-gradient(90deg, #f85149, #3fb950)' } },
-  { key: 'xiangs' as const, label: '线段', dotStyle: { background: 'linear-gradient(90deg, #ffe066, #ff9f7f)' } },
+  { key: 'xians' as const, label: '线段', dotStyle: { background: 'linear-gradient(90deg, #ffe066, #ff9f7f)' } },
   { key: 'zhongshus' as const, label: '中枢', dotStyle: { background: '#bc8cff' } },
   { key: 'signals' as const, label: '买卖点', dotStyle: { background: '#3fb950' } },
   { key: 'aiLines' as const, label: 'AI信号线', dotStyle: { background: '#d29922' } },

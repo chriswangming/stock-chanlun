@@ -49,11 +49,12 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import echarts from '../../utils/echarts'
-import type { KLine, Bi, XiangSegment, Zhongshu, Signal, AISignal, SupportResistance } from '@/api/stock'
+import type { KLine, Bi, XianSegment, Zhongshu, Signal, AISignal, SupportResistance } from '@/api/stock'
 import type { IndicatorConfig } from '@/stores/chanlun'
 import { calcMA, computeDualMacdSkdjMarkerIndices } from '@/utils/stockIndicators'
 import { downsampleKlines, klineSeriesSignature } from '@/utils/chartDownsample'
 import { setChartOptionKeepDataZoom } from '@/utils/chartEchartsHelpers'
+import { formatAxisLabel, formatStamp, normTs } from '@/utils/chartDateUtils'
 import { useDebouncedCallback } from '@/composables/useDebounce'
 import { useKlineIndicators } from '@/composables/useKlineIndicators'
 import {
@@ -72,7 +73,7 @@ const props = defineProps<{
   bis: Bi[]
   zhongshus: Zhongshu[]
   signals: Signal[]
-  xiangs?: XiangSegment[]
+  xians?: XianSegment[]
   aiSignal?: AISignal | null
   supportResistance?: SupportResistance[]
   indicators?: IndicatorConfig
@@ -105,7 +106,7 @@ type DataZoomOption = { startValue?: number; endValue?: number; start?: number; 
 function getIndicators(): Required<IndicatorConfig> {
   return {
     ma5: true, ma20: true, ma60: true,
-    bis: true, xiangs: false, zhongshus: true,
+    bis: true, xians: false, zhongshus: true,
     signals: true, aiLines: true, supportResistance: true,
     volume: true, macd: false, rsi: false, skdj: false,
     ...(props.indicators || {})
@@ -127,7 +128,7 @@ function fmtPrice(v: number | null | undefined): string {
 function formatBarLine(idx: number): string {
   if (idx < 0 || idx >= lastDisplayKlines.length) return ''
   const k = lastDisplayKlines[idx]
-  const d = lastDates[idx] ?? k.date.slice(0, 10)
+  const d = formatStamp(lastDates[idx] ?? k.date)
   return `${d}  开 ${fmtPrice(k.open)}  收 ${fmtPrice(k.close)}  高 ${fmtPrice(k.high)}  低 ${fmtPrice(k.low)}  |  MA5 ${fmtPrice(lastMa5[idx])}  MA20 ${fmtPrice(lastMa20[idx])}  MA60 ${fmtPrice(lastMa60[idx])}`
 }
 
@@ -189,14 +190,14 @@ function buildOverlayData(): ChanlunOverlayPayload {
     dates: lastDates,
     seriesKlines: chartKlines,
     bis: props.bis,
-    xiangs: props.xiangs,
+    xians: props.xians,
     zhongshus: props.zhongshus,
     signals: props.signals,
     aiSignal: props.aiSignal,
     supportResistance: props.supportResistance,
     flags: {
       bis: ind.bis,
-      xiangs: ind.xiangs,
+      xians: ind.xians,
       zhongshus: ind.zhongshus,
       signals: ind.signals,
       aiLines: ind.aiLines,
@@ -249,7 +250,8 @@ function buildOption(chartH: number = 300) {
   if (!klines.length) return {}
 
   lastDisplayKlines = klines
-  const dates = klines.map(k => k.date.slice(0, 10))
+  // 分钟级周期同一天有多根 bar，类目必须用完整时间戳才唯一
+  const dates = klines.map(k => normTs(k.date))
   const ohlc = klines.map(k => [k.open, k.close, k.low, k.high])
   const closes = klines.map(k => k.close)
   const ind = getIndicators()
@@ -342,7 +344,10 @@ function buildOption(chartH: number = 300) {
     xAxes.push({ type: 'category', data: dates, gridIndex: subIdx, boundaryGap: true,
       axisLine: { lineStyle: { color: GRID_COLOR } },
       axisTick: { show: false },
-      axisLabel: { color: TEXT_COLOR, fontSize: 9, show: subIdx === grids.length - 1 },
+      axisLabel: {
+        color: TEXT_COLOR, fontSize: 9, show: subIdx === grids.length - 1,
+        formatter: (v: string) => formatAxisLabel(v),
+      },
       splitLine: { show: false } })
 
     yAxes.push({ scale: true, gridIndex: subIdx,
@@ -588,7 +593,7 @@ watch(
 )
 
 watch(
-  () => [props.bis, props.zhongshus, props.signals, props.xiangs, props.aiSignal, props.supportResistance],
+  () => [props.bis, props.zhongshus, props.signals, props.xians, props.aiSignal, props.supportResistance],
   updateOverlayOnly,
   { deep: true }
 )
@@ -596,7 +601,7 @@ watch(
 watch(
   () => [
     props.indicators?.bis,
-    props.indicators?.xiangs,
+    props.indicators?.xians,
     props.indicators?.zhongshus,
     props.indicators?.signals,
     props.indicators?.aiLines,

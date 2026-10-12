@@ -7,7 +7,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from chanlun.elements import Bi, XiangSegment
+from chanlun.elements import Bi, XianSegment
 from chanlun.segment_detector import SegmentDetector
 
 
@@ -29,11 +29,11 @@ class SegmentDetectorTests(unittest.TestCase):
             end_price=high if direction == "up" else low,
         )
 
-    def _segment(self, idx: int, direction: str, start_min: int, end_min: int, high: float, low: float) -> XiangSegment:
+    def _segment(self, idx: int, direction: str, start_min: int, end_min: int, high: float, low: float) -> XianSegment:
         start = self.t0 + timedelta(minutes=start_min)
         end = self.t0 + timedelta(minutes=end_min)
-        return XiangSegment(
-            id=f"xiang_{idx}",
+        return XianSegment(
+            id=f"xian_{idx}",
             start=start,
             end=end,
             direction=direction,
@@ -89,7 +89,7 @@ class SegmentDetectorTests(unittest.TestCase):
         self.assertEqual(zs.end, segments[2].end)
         self.assertAlmostEqual(zs.range_high, 108.0)
         self.assertAlmostEqual(zs.range_low, 103.0)
-        self.assertEqual(zs.xiang_ids, ["xiang_1", "xiang_2", "xiang_3"])
+        self.assertEqual(zs.xian_ids, ["xian_1", "xian_2", "xian_3"])
 
     def test_detect_zhongshus_extension_keeps_overlap_not_union(self):
         # 中枢延伸时区间应取所有段的交叠（收窄），而非并集扩张
@@ -108,7 +108,7 @@ class SegmentDetectorTests(unittest.TestCase):
         zs = zhongshus[0]
         self.assertAlmostEqual(zs.range_high, 108.0)
         self.assertAlmostEqual(zs.range_low, 105.0)
-        self.assertEqual(zs.xiang_ids, ["xiang_1", "xiang_2", "xiang_3", "xiang_4"])
+        self.assertEqual(zs.xian_ids, ["xian_1", "xian_2", "xian_3", "xian_4"])
 
     def test_get_zhongshu_for_price_returns_latest_matching_zone(self):
         segments = [

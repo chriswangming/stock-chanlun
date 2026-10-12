@@ -25,7 +25,7 @@ class BiDetector:
 
     @property
     def processed_klines(self) -> pd.DataFrame:
-        """包含关系处理后的 K 线（与笔/分型检测一致）。"""
+        """处理包含关系后的 K 线（与笔/分型检测一致）。"""
         return self._fenxing_detector.klines
 
     @staticmethod

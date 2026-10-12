@@ -141,7 +141,7 @@ def build_ai_signal_response(code: str, level: str, model: str, use_llm: bool) -
             log.debug("背驰检测失败 code=%s", code, exc_info=True)
 
     classifier = WaveClassifier()
-    wave_class = classifier.classify(result.xiangs, result.zhongshus, current_price)
+    wave_class = classifier.classify(result.xians, result.zhongshus, current_price)
 
     engine = StrategyEngine(
         signals=result.signals,
@@ -164,7 +164,7 @@ def build_ai_signal_response(code: str, level: str, model: str, use_llm: bool) -
                 chanlun_cache.set(daily_key, daily_result)
             if daily_result is not None:
                 daily_cls = WaveClassifier().classify(
-                    daily_result.xiangs,
+                    daily_result.xians,
                     daily_result.zhongshus,
                     float(daily_result.klines[-1].close) if daily_result.klines else 0.0,
                 )

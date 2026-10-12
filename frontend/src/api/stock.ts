@@ -136,7 +136,7 @@ export interface Bi {
   end_price?: number
 }
 
-export interface XiangSegment {
+export interface XianSegment {
   id: string
   start: string
   end: string
@@ -334,7 +334,7 @@ export interface ChanlunResult {
   klines?: KLine[]
   total?: number
   bis: Bi[]
-  xiangs: XiangSegment[]
+  xians: XianSegment[]
   zhongshus: Zhongshu[]
   signals: Signal[]
   supportResistance: SupportResistance[]
