@@ -44,11 +44,41 @@ def _atomic_write_json(path: Path, data: Any) -> None:
         raise
 
 
+# 港股代码统一 5 位。历史上前端按 6 位补零（'700' -> '000700'）写入，
+# 而读取时又 zfill(6)，写读口径不一致会产出富途不认的代码并让同一只股票撞键。
+_WATCHLIST_DIGITS = 5
+
+
+def _normalize_watchlist_code(code: object) -> str:
+    """自选股代码归一化——写入与读取必须走这里，保证磁盘上的键唯一且与富途一致。
+
+    '700' / '00700' / '000700' / 'HK.00700'  ->  '00700'
+    """
+    s = str(code or "").strip()
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return s
+    if len(digits) > _WATCHLIST_DIGITS:
+        stripped = digits.lstrip("0")
+        if stripped:
+            digits = stripped
+    return digits.zfill(_WATCHLIST_DIGITS)
+
+
 def _load_watchlist_from_disk() -> dict[str, str]:
     try:
         if _WATCHLIST_FILE.exists():
             data = json.loads(_WATCHLIST_FILE.read_text(encoding="utf-8"))
-            return {str(k).zfill(6): str(v) for k, v in data.items() if str(k).strip()}
+            out: dict[str, str] = {}
+            for k, v in data.items():
+                key = _normalize_watchlist_code(k)
+                if not key:
+                    continue
+                old = out.get(key)
+                # 归一化后可能撞键（000700 与 00700 是同一只），保留更早的加入时间
+                if old is None or str(v) < old:
+                    out[key] = str(v)
+            return out
     except Exception as e:
         log.warning("自选股加载失败: %s", e)
     return {}
@@ -68,8 +98,27 @@ def init_stores() -> None:
     global _watchlist, _comments
     with _watchlist_lock:
         _watchlist = _load_watchlist_from_disk()
+        _migrate_watchlist_file()
     with _comments_lock:
         _comments = _load_comments_from_disk()
+
+
+def _migrate_watchlist_file() -> None:
+    """磁盘上若还留着旧口径（6 位补零 / 重复键）的代码，就地归一化并写回。"""
+    if not _WATCHLIST_FILE.exists():
+        return
+    try:
+        raw = json.loads(_WATCHLIST_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    dirty = len(raw) != len(_watchlist) or any(
+        _normalize_watchlist_code(k) != str(k) for k in raw
+    )
+    if dirty:
+        log.warning("自选股代码格式已归一化: %s -> %s", sorted(raw), sorted(_watchlist))
+        _atomic_write_json(_WATCHLIST_FILE, _watchlist)
 
 
 def get_watchlist_map() -> dict[str, str]:
@@ -81,6 +130,7 @@ def watchlist_add(sym: str) -> tuple[str, bool]:
     """返回 (iso_time, was_new)."""
     from datetime import datetime
 
+    sym = _normalize_watchlist_code(sym)
     with _watchlist_lock:
         if sym in _watchlist:
             return _watchlist[sym], False
@@ -90,6 +140,7 @@ def watchlist_add(sym: str) -> tuple[str, bool]:
 
 
 def watchlist_remove(sym: str) -> bool:
+    sym = _normalize_watchlist_code(sym)
     with _watchlist_lock:
         if sym not in _watchlist:
             return False

@@ -38,6 +38,14 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+  // 服务端行情没拉到时会返回空数组但 total > 0。这时若照常覆盖，
+  // 用户攒的自选股会在刷新瞬间被清空——保留本地列表，等下一次成功再更新。
+  function applyStocks(list: Quote[], total?: number) {
+    if (list.length > 0 || !(total && total > 0)) {
+      stocks.value = list
+    }
+  }
+
   watch(
     () => stocks.value.map(s => `${s.code}:${s.price}:${s.change_pct}`).join('|'),
     () => {
@@ -58,7 +66,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
         if (!peek.isStale) return
         try {
           const res = await stockApi.watchlist({ force: true })
-          stocks.value = res.data.stocks || []
+          applyStocks(res.data.stocks || [], res.data.total)
           lastUpdated.value = new Date()
         } catch {
           /* 保留 stale */
@@ -78,7 +86,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     error.value = null
     try {
       const res = await stockApi.watchlist({ force })
-      stocks.value = res.data.stocks || []
+      applyStocks(res.data.stocks || [], res.data.total)
       lastUpdated.value = new Date()
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e)

@@ -247,15 +247,26 @@ class SignalDetector:
         return signals
 
     def detect_trend(self) -> str:
-        """判断当前走势类型"""
+        """判断当前走势类型。
+
+        中枢数量不再作为判据 —— chan.py 口径下中枢数量天然偏多，
+        改用最近若干线段的高低点是否逐级抬高/降低来判定趋势。
+        """
         if not self.segments:
             return "未知"
         recent = self.segments[-3:]
+        if len(recent) >= 2:
+            highs = [s.high for s in recent]
+            lows = [s.low for s in recent]
+            if all(highs[i] > highs[i - 1] and lows[i] > lows[i - 1]
+                   for i in range(1, len(recent))):
+                return "上涨"
+            if all(highs[i] < highs[i - 1] and lows[i] < lows[i - 1]
+                   for i in range(1, len(recent))):
+                return "下跌"
+
         downs = sum(1 for s in recent if s.direction == "down")
         ups = sum(1 for s in recent if s.direction == "up")
-
-        if len(self.zhongshus) > 1:
-            return "盘整"
         if downs > ups:
             return "下跌"
         if ups > downs:

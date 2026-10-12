@@ -61,6 +61,25 @@ def serialize_crypto_analysis(result: ChanlunAnalysis) -> dict:
             }
             for k in result.klines
         ],
+        # 包含处理后的合并K线（与 A 股口径一致）
+        "merged_klines": [
+            {
+                "start": str(m.start)[:19],
+                "end": str(m.end)[:19],
+                "start_idx": m.start_idx,
+                "end_idx": m.end_idx,
+                "high": m.high,
+                "low": m.low,
+                "dir": m.dir,
+                "count": m.count,
+                "fx": m.fx,
+                "included": [
+                    {"date": str(r.date)[:19], "high": r.high, "low": r.low}
+                    for r in m.included
+                ],
+            }
+            for m in result.merged_klines
+        ],
         "bis": [
             {
                 "id": b.id,
@@ -71,6 +90,8 @@ def serialize_crypto_analysis(result: ChanlunAnalysis) -> dict:
                 "low": b.low,
                 "start_price": b.start_price,
                 "end_price": b.end_price,
+                # chan.py 口径：False 表示尾部「虚笔」（正在走、尚未确认）
+                "is_sure": b.is_sure,
             }
             for b in result.bis
         ],
@@ -81,6 +102,8 @@ def serialize_crypto_analysis(result: ChanlunAnalysis) -> dict:
                 "end": str(z.end)[:19],
                 "range_high": z.range_high,
                 "range_low": z.range_low,
+                "center": z.center,
+                "is_sure": z.is_sure,
             }
             for z in result.zhongshus
         ],

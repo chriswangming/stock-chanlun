@@ -19,7 +19,7 @@ from core.kline_serialize import df_to_kline_dicts
 from core.numbers import finite_float
 from deps import check_kline_rate_limits, check_light_api_rate_limits, check_screening_rate_limits, client_ip
 from utils import market_overview_cache, sector_board_cache, stock_news_cache
-from services.futu_hk_service import (
+from services.akshare_service import (
     get_board_constituents_em,
     get_daily_hot_stocks,
     get_kline_hist,

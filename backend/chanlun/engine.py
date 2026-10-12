@@ -3,9 +3,11 @@
 """
 import pandas as pd
 from datetime import datetime
+
+from .config import ChanlunConfig
 from .elements import (
     KLine, Bi, XianSegment, Zhongshu, BuySellPoint,
-    ChanlunAnalysis
+    ChanlunAnalysis, MergedKLineInfo, IncludedRaw
 )
 from .bi_detector import BiDetector
 from .segment_detector import SegmentDetector
@@ -20,11 +22,13 @@ class ChanlunEngine:
         result = engine.analyze(level="daily")
     """
 
-    def __init__(self, klines: pd.DataFrame):
+    def __init__(self, klines: pd.DataFrame, config: ChanlunConfig | None = None):
         """
         klines: DataFrame, columns=[date, open, high, low, close, volume]
+        config: 缠论计算参数（笔/线段/中枢），默认对齐 chan.py
         """
         self.raw_klines = klines.copy()
+        self.config = config or ChanlunConfig()
         self._ensure_columns()
 
     def _ensure_columns(self):
@@ -41,15 +45,13 @@ class ChanlunEngine:
 
     def analyze(self, level: str = "daily") -> ChanlunAnalysis:
         """执行完整缠论分析"""
-        # 笔检测器内部已完成分型识别与包含处理，无需单独跑一遍分型
-        bi_detector = BiDetector(self.raw_klines)
-        bis = bi_detector.detect(min_bars=5)
+        # 1. 包含处理 + 分型（在 BiDetector 内部完成）
+        bi_detector = BiDetector(self.raw_klines, config=self.config)
+        bis = bi_detector.detect()
 
-        # 3. 线段识别
-        seg_detector = SegmentDetector(bis)
-        segments = seg_detector.detect_segments(min_overlap_bis=3)
-
-        # 4. 中枢识别
+        # 2. 线段（特征序列法）与中枢（段内中枢，基于笔的重叠）
+        seg_detector = SegmentDetector(bis, config=self.config)
+        segments = seg_detector.detect_segments()
         zhongshus = seg_detector.detect_zhongshus(segments)
 
         # 5. 买卖点判定
@@ -71,6 +73,7 @@ class ChanlunEngine:
             stock_code="",
             level=level,
             klines=kline_objects,
+            merged_klines=self._to_merged_klines(bi_detector.merged_klines),
             bis=bis,
             xians=segments,
             zhongshus=zhongshus,
@@ -100,6 +103,39 @@ class ChanlunEngine:
                 )
             )
         return rows
+
+    @staticmethod
+    def _to_merged_klines(merged) -> list[MergedKLineInfo]:
+        """把包含处理后的合并K线转成可序列化的结构。
+
+        注意 high/low 用合并后的区间值（MergedKLine.high/low），而不是区间内
+        原始K线的最高/最低 —— 包含处理的核心就是按合并方向「削掉」被包住的部分。
+        """
+        out: list[MergedKLineInfo] = []
+        for m in merged:
+            if not len(m.lst):
+                continue
+            first, last = m.lst[0], m.lst[-1]
+            # 被包含进来的原始K线（lst[1:]）：前端用蓝色细线画它们的真实高低范围
+            included = [
+                IncludedRaw(date=r.date, high=float(r.high), low=float(r.low))
+                for r in m.lst[1:]
+            ]
+            out.append(
+                MergedKLineInfo(
+                    start=first.date,
+                    end=last.date,
+                    start_idx=int(first.idx),
+                    end_idx=int(last.idx),
+                    high=float(m.high),
+                    low=float(m.low),
+                    dir=m.dir,
+                    count=len(m.lst),
+                    fx=m.fx,
+                    included=included,
+                )
+            )
+        return out
 
     def _make_summary(self, trend: str, signals: list[BuySellPoint],
                       zhongshus: list[Zhongshu]) -> str:

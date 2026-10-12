@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from deps import check_light_api_rate_limits, client_ip
-from services.futu_hk_service import normalize_stock_code
+from services.akshare_service import normalize_stock_code
 from stores.local_json import (
     comments_add,
     comments_delete,

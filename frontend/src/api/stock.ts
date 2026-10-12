@@ -125,6 +125,32 @@ export interface KLine {
   volume: number
 }
 
+/** 被合并进合并K线的原始K线（画成蓝色高低线的那部分） */
+export interface IncludedRaw {
+  date: string
+  high: number
+  low: number
+}
+
+/** 包含处理后的合并K线（chan.py CKLine）：count>1 表示这里发生过包含合并 */
+export interface MergedKline {
+  /** 该合并K线覆盖的原始K线首/尾时间 */
+  start: string
+  end: string
+  start_idx?: number
+  end_idx?: number
+  /** 合并后的区间高低点（不是区间内原始K线的最值——包含处理会削掉被包住的部分） */
+  high: number
+  low: number
+  /** 合并方向：up=红框 / down=绿框（参考 chan.py 出图） */
+  dir?: 'up' | 'down'
+  /** 被合并进来的原始K线根数 */
+  count?: number
+  fx?: 'top' | 'bottom' | null
+  /** 被包含的原始K线（不含首根），蓝色细线画真实高低范围 */
+  included?: IncludedRaw[]
+}
+
 export interface Bi {
   id: string
   start: string
@@ -134,6 +160,8 @@ export interface Bi {
   low: number
   start_price?: number
   end_price?: number
+  /** chan.py 口径：false = 尾部「虚笔」，正在走、尚未确认 */
+  is_sure?: boolean
 }
 
 export interface XianSegment {
@@ -145,6 +173,8 @@ export interface XianSegment {
   low: number
   start_price?: number
   end_price?: number
+  /** false = 尾部线段或首段切分出来的段，尚未确认 */
+  is_sure?: boolean
 }
 
 export interface Zhongshu {
@@ -153,6 +183,9 @@ export interface Zhongshu {
   end: string
   range_high: number
   range_low: number
+  /** 中枢中位价 (ZG+ZD)/2 */
+  center?: number
+  is_sure?: boolean
 }
 
 export interface Signal {
@@ -268,6 +301,8 @@ export interface Quote {
   prev_close: number
   amount: number
   added_at?: string  // 自选添加时间（ISO 字符串）
+  /** false = 行情没取到（富途不认该代码或快照失败），列表里仍要保留这一条 */
+  quote_ok?: boolean
 }
 
 /** 腾讯行情接口解析的基本面/行情字段（与后端 get_stock_info 一致） */
@@ -333,6 +368,8 @@ export interface ChanlunResult {
   /** 与 /kline 同结构，缠论接口一并返回时可省一次行情请求 */
   klines?: KLine[]
   total?: number
+  /** 包含处理后的合并K线序列（与 klines 同源） */
+  merged_klines?: MergedKline[]
   bis: Bi[]
   xians: XianSegment[]
   zhongshus: Zhongshu[]

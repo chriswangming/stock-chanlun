@@ -35,6 +35,40 @@ class ChanlunEngineKlinesTests(unittest.TestCase):
         processed = BiDetector(raw).processed_klines
         self.assertLess(len(processed), len(raw))
 
+    def test_merged_klines_cover_all_raw_bars(self):
+        """合并K线必须首尾相接、无缝覆盖全部原始K线（前端据此画区间框）。"""
+        raw = _sample_df()
+        result = ChanlunEngine(raw).analyze(level="daily")
+        mk = result.merged_klines
+        # 该样例: [0,1] 被合并 -> [2,3] 被合并 -> [4] 独立
+        self.assertEqual([m.count for m in mk], [2, 2, 1])
+        self.assertEqual(mk[0].start_idx, 0)
+        self.assertEqual(mk[-1].end_idx, len(raw) - 1)
+        for a, b in zip(mk, mk[1:]):
+            self.assertEqual(b.start_idx, a.end_idx + 1)
+        for m in mk:
+            self.assertGreaterEqual(m.high, m.low)
+
+    def test_merged_klines_high_low_follow_combine_direction(self):
+        """向上合并时 low 取 max（被包住的低点被削掉），不是区间内最低价。"""
+        result = ChanlunEngine(_sample_df()).analyze(level="daily")
+        first = result.merged_klines[0]
+        # 前两根: [9.5, 11] 与 [10.0, 10.8]，向上合并后应为 [10.0, 11]
+        self.assertEqual(first.low, 10.0)
+        self.assertEqual(first.high, 11.0)
+
+    def test_serialize_includes_merged_klines(self):
+        from core.chanlun_response import serialize_chanlun_analysis
+
+        result = ChanlunEngine(_sample_df()).analyze(level="daily")
+        data = serialize_chanlun_analysis(result)
+        self.assertIn("merged_klines", data)
+        self.assertEqual(len(data["merged_klines"]), len(result.merged_klines))
+        row = data["merged_klines"][0]
+        for key in ("start", "end", "start_idx", "end_idx", "high", "low", "dir", "count"):
+            self.assertIn(key, row)
+        self.assertEqual(row["count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from chanlun.elements import ChanlunAnalysis
 from chanlun.engine import ChanlunEngine
 from core.kline_serialize import analysis_klines_to_df
-from services.futu_hk_service import get_kline_hist  # used by run_analysis
+from services.akshare_service import get_kline_hist  # used by run_analysis
 from utils import chanlun_cache, chanlun_multi_cache
 
 DEFAULT_KLINE_LIMIT = 500

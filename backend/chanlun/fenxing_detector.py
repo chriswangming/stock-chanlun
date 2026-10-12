@@ -1,11 +1,15 @@
-"""Fenxing detector: top and bottom fractals after inclusion processing."""
+"""Fenxing detector: K线包含处理 + 顶底分型识别（算法对齐 chan.py）。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
-import numpy as np
 import pandas as pd
+
+from .base import (
+    BOTTOM, COMBINE, DOWN, TOP, UP,
+    MergedKLine, RawBar,
+)
 
 
 @dataclass
@@ -16,152 +20,117 @@ class Fenxing:
     type: Literal["top", "bottom"]
     high: float
     low: float
-    index: int
+    index: int                      # 合并后K线的序号（KLC idx）
+    raw_index: int = -1             # 极值所在原始K线的序号
+    klc_date: Optional[datetime] = None   # 合并K线的起始时间
+    merged_count: int = 1           # 该合并K线包含多少根原始K线
 
 
 class FenxingDetector:
     """
-    Detect Chanlun fenxing.
+    检测缠论分型。
 
-    The detector first removes containing K-line relationships. In an upward
-    merge, keep the higher high and higher low; in a downward merge, keep the
-    lower high and lower low. This preserves the effective swing shape used by
-    later bi detection.
+    流程与 chan.py 一致：
+    1. 先做包含关系处理 —— 方向在「新K线加入时」由它与前一根的关系一次性确定
+       （chan.py CKLine_Combiner.test_combine），而不是每次合并时重新推断；
+    2. 再用相邻三根合并K线判定顶/底分型；
+    3. 分型的时间取「区间内真正造出极值的那根原始K线」（chan.py get_peak_klu），
+       这样笔的端点才会落在真实的转折点而不是被包含吞掉的最后一根。
     """
 
     def __init__(self, klines: pd.DataFrame):
-        self.klines = klines.reset_index(drop=True)
-        self._process_inclusion()
+        df = klines.reset_index(drop=True)
+        self.raw_klines = df
+        self.raws: list[RawBar] = []
+        self.merged: list[MergedKLine] = []
+        self._build(df)
 
-    def _process_inclusion(self):
-        """Process containing K-lines before fenxing detection."""
-        df = self.klines
+    # ── 包含处理 ────────────────────────────────────────────
+    def _build(self, df: pd.DataFrame):
         if df.empty:
             return
 
-        highs = df["high"].to_numpy(dtype=float)
-        lows = df["low"].to_numpy(dtype=float)
-        opens = df["open"].to_numpy(dtype=float)
-        closes = df["close"].to_numpy(dtype=float)
         dates = df["date"].tolist()
-        volumes = df["volume"].to_numpy(dtype=float) if "volume" in df.columns else np.zeros(len(df))
+        highs = df["high"].tolist()
+        lows = df["low"].tolist()
+        opens = df["open"].tolist()
+        closes = df["close"].tolist()
+        vols = df["volume"].tolist() if "volume" in df.columns else [0.0] * len(df)
 
-        out_high = [highs[0]]
-        out_low = [lows[0]]
-        out_open = [opens[0]]
-        out_close = [closes[0]]
-        out_date = [dates[0]]
-        out_vol = [float(volumes[0])]
-
-        def merge_direction(prev_h, prev_l, before_h, before_l, cur_h, cur_l) -> str:
-            if len(out_high) >= 2:
-                if prev_h >= before_h and prev_l >= before_l:
-                    return "up"
-                if prev_h <= before_h and prev_l <= before_l:
-                    return "down"
-            return "up" if cur_h >= prev_h and cur_l >= prev_l else "down"
-
-        for i in range(1, len(df)):
-            cur_h, cur_l = highs[i], lows[i]
-            prev_h, prev_l = out_high[-1], out_low[-1]
-            contained = (
-                (prev_l <= cur_l and prev_h >= cur_h)
-                or (cur_l <= prev_l and cur_h >= prev_h)
-            )
-            if not contained:
-                out_high.append(cur_h)
-                out_low.append(cur_l)
-                out_open.append(opens[i])
-                out_close.append(closes[i])
-                out_date.append(dates[i])
-                out_vol.append(float(volumes[i]))
+        self.raws = []
+        for i in range(len(df)):
+            o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+            # 丢掉缺失/非有限的脏数据：NaN 会污染包含关系判定（max/min 传播后整段失效）
+            if any(v is None or v != v or v in (float("inf"), float("-inf"))
+                   for v in (o, h, l, c)):
                 continue
+            o, h, l, c = float(o), float(h), float(l), float(c)
+            if h < l:  # 个别数据源高低价颠倒
+                h, l = l, h
+            self.raws.append(
+                RawBar(len(self.raws), self._as_datetime(dates[i]), o, h, l, c,
+                       float(vols[i] or 0.0))
+            )
+        if not self.raws:
+            return
 
-            # 处理K线的包含关系
-            before_h = out_high[-2] if len(out_high) >= 2 else prev_h
-            before_l = out_low[-2] if len(out_low) >= 2 else prev_l
-            direction = merge_direction(prev_h, prev_l, before_h, before_l, cur_h, cur_l)
-            prev_contains = prev_l <= cur_l and prev_h >= cur_h
-            if direction == "up":
-                out_high[-1] = max(prev_h, cur_h)
-                out_low[-1] = max(prev_l, cur_l)
-            else:
-                out_high[-1] = min(prev_h, cur_h)
-                out_low[-1] = min(prev_l, cur_l)
-            out_close[-1] = closes[i]
-            out_vol[-1] += float(volumes[i])
-            if not prev_contains:
-                out_date[-1] = dates[i]
+        self.merged = [MergedKLine(self.raws[0], idx=0, _dir=UP)]
+        for raw in self.raws[1:]:
+            # try_add 返回 UP/DOWN 表示无需合并、需要新建一根合并K线，
+            # 新K线的合并方向由这个返回值决定（chan.py add_single_klu）
+            direction = self.merged[-1].try_add(raw)
+            if direction != COMBINE:
+                self.merged.append(MergedKLine(raw, idx=len(self.merged), _dir=direction))
 
-        self.klines = pd.DataFrame({
-            "date": out_date,
-            "open": out_open,
-            "high": out_high,
-            "low": out_low,
-            "close": out_close,
-            "volume": out_vol,
-        }).reset_index(drop=True)
+        self._mark_fx()
 
+    def _mark_fx(self):
+        """每根合并K线的分型需要它的右邻居出现后才能确定（chan.py update_fx）。"""
+        for i in range(1, len(self.merged) - 1):
+            self.merged[i].update_fx(self.merged[i - 1], self.merged[i + 1])
+
+    # ── 输出 ────────────────────────────────────────────────
     def detect(self) -> list[Fenxing]:
-        """
-        Detect strict three-bar fractals.
-
-        Top: middle high and low are both higher than neighbours.
-        Bottom: middle high and low are both lower than neighbours.
-        """
-        df = self.klines
-        n = len(df)
-        if n < 3:
-            return []
-
-        highs = df["high"].to_numpy(dtype=float)
-        lows = df["low"].to_numpy(dtype=float)
-        dates = df["date"].tolist()
-        fenxings: list[Fenxing] = []
-
-        prev_h = highs[:-2]
-        prev_l = lows[:-2]
-        mid_h = highs[1:-1]
-        mid_l = lows[1:-1]
-        next_h = highs[2:]
-        next_l = lows[2:]
-
-        top_mask = (
-            (mid_h > prev_h)
-            & (mid_h > next_h)
-            & (mid_l > prev_l)
-            & (mid_l > next_l)
-        )
-        bottom_mask = (
-            (mid_h < prev_h)
-            & (mid_h < next_h)
-            & (mid_l < prev_l)
-            & (mid_l < next_l)
-        )
-
-        for i in np.flatnonzero(top_mask):
-            idx = int(i) + 1
-            fenxings.append(
+        """返回所有顶/底分型（按时间升序）。"""
+        out: list[Fenxing] = []
+        for klc in self.merged:
+            if klc.fx not in (TOP, BOTTOM):
+                continue
+            is_high = klc.fx == TOP
+            peak = klc.get_peak(is_high=is_high)
+            out.append(
                 Fenxing(
-                    date=dates[idx],
-                    type="top",
-                    high=float(mid_h[i]),
-                    low=float(mid_l[i]),
-                    index=idx,
+                    date=peak.date,
+                    type=klc.fx,
+                    high=float(klc.high),
+                    low=float(klc.low),
+                    index=klc.idx,
+                    raw_index=peak.idx,
+                    klc_date=klc.time_begin,
+                    merged_count=len(klc.lst),
                 )
             )
+        return out
 
-        for i in np.flatnonzero(bottom_mask):
-            idx = int(i) + 1
-            fenxings.append(
-                Fenxing(
-                    date=dates[idx],
-                    type="bottom",
-                    high=float(mid_h[i]),
-                    low=float(mid_l[i]),
-                    index=idx,
-                )
-            )
+    @property
+    def klines(self) -> pd.DataFrame:
+        """处理包含关系后的 K 线 DataFrame（对外兼容旧接口）。"""
+        return pd.DataFrame(
+            [
+                {
+                    "date": m.time_begin,
+                    "open": m.lst[0].open,
+                    "high": m.high,
+                    "low": m.low,
+                    "close": m.lst[-1].close,
+                    "volume": sum(float(r.volume or 0.0) for r in m.lst),
+                }
+                for m in self.merged
+            ]
+        )
 
-        fenxings.sort(key=lambda f: f.index)
-        return fenxings
+    @staticmethod
+    def _as_datetime(d) -> datetime:
+        if hasattr(d, "to_pydatetime"):
+            return d.to_pydatetime()
+        return d

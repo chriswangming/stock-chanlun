@@ -37,7 +37,9 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import echarts from '../../utils/echarts'
-import type { KLine, Bi, XianSegment, Zhongshu, Signal, AISignal, SupportResistance } from '../../api/stock'
+import type {
+  KLine, Bi, XianSegment, Zhongshu, Signal, AISignal, SupportResistance, MergedKline,
+} from '../../api/stock'
 import type { IndicatorConfig } from '../../stores/chanlun'
 import { calcMA, computeDualMacdSkdjMarkerIndices } from '../../utils/stockIndicators'
 import { downsampleKlines, klineSeriesSignature } from '../../utils/chartDownsample'
@@ -55,6 +57,8 @@ import {
 
 const props = defineProps<{
   klines: KLine[]
+  /** 包含处理后的合并K线（chan.py CKLine），在主图上画区间框 */
+  mergedKlines?: MergedKline[]
   bis: Bi[]
   zhongshus: Zhongshu[]
   signals: Signal[]
@@ -78,7 +82,7 @@ function getIndicators(): Required<IndicatorConfig> {
   return {
     ma5: true, ma20: true, ma60: true,
     bis: true, xians: false, zhongshus: true, signals: true, aiLines: true,
-    supportResistance: true,
+    supportResistance: true, mergedKlines: true,
     volume: true, macd: true, rsi: true, skdj: true,
     ...(props.indicators || {})
   }
@@ -89,14 +93,49 @@ type DataZoomOption = { startValue?: number; endValue?: number; start?: number; 
 
 let chanlunOverlayCache: ChanlunOverlayPayload | null = null
 
-const COLOR_UP = '#f85149'
-const COLOR_DOWN = '#3fb950'
+/** 主图/副图分隔线的 y 坐标（buildOption 里算，buildPanelSeparators 里用） */
+let panelSepTops: number[] = []
+
+/**
+ * 面板分隔线。注意：缠论叠加层用 replaceMerge:['graphic'] 整组替换 graphic，
+ * 所以这里每次写 graphic 都必须把分隔线一起带上，否则会被擦掉。
+ */
+function buildPanelSeparators(): Record<string, unknown>[] {
+  const w = chart?.getWidth?.() ?? 0
+  if (!w || !panelSepTops.length) return []
+  return panelSepTops.map((y, i) => ({
+    id: `panel-sep-${i}`,
+    type: 'line',
+    silent: true,
+    z: 50,
+    shape: { x1: 0, y1: y, x2: w, y2: y },
+    style: { stroke: PANEL_SEP_COLOR, lineWidth: 1 },
+  }))
+}
+
+// 涨红跌绿（A股/港股口径）。白底上把亮红/亮绿各压深一档，否则阴线实心块几乎看不见。
+const COLOR_UP = '#dc2626'
+const COLOR_DOWN = '#16a34a'
+// 图表底色为白色（浏览器实际渲染口径）。下面这些配色都按浅色底取值：
+// 深色主题那套 #30363d/#7d8590/#21262d 在白底上几乎看不见。
+const CHART_BG = '#ffffff'
+const AXIS_LINE = '#d0d7de'
+const SPLIT_LINE = 'rgba(0, 0, 0, 0.08)'
+const SPLIT_LINE_SUB = '#eaeef2'
+const AXIS_LABEL = '#57606a'
+const POINTER_LINE = '#8c959f'
 const MAIN_TOP = 36
 const MAIN_HEIGHT = 420
 const SUB_PANEL_HEIGHT = { volume: 120, macd: 120, rsi: 100, skdj: 100 } as const
 const SUB_PANEL_ORDER = ['volume', 'macd', 'rsi', 'skdj'] as const
 type SubPanelKey = (typeof SUB_PANEL_ORDER)[number]
-const SUB_GAP = 4
+// 面板之间留白，分隔线画在正中
+const SUB_GAP = 14
+const PANEL_SEP_COLOR = '#d8dee4'
+// 纵轴标签是画在 grid 左边界「外面」的，左边距太小会被画布裁掉（实测 left:10 时
+// 标签左边缘在 x=-16，整列都看不见）。必须预留 >= 标签宽度 + 间距的空间。
+const AXIS_LEFT = 58
+const AXIS_RIGHT = 16
 const SLIDER_BOTTOM = 5
 const SLIDER_HEIGHT = 20
 
@@ -127,6 +166,19 @@ function fmtPrice(v: number | null | undefined): string {
   return v.toFixed(2)
 }
 
+function fmtVol(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—'
+  const n = Math.abs(v)
+  if (n >= 1e8) return `${(v / 1e8).toFixed(2)}亿`
+  if (n >= 1e4) return `${(v / 1e4).toFixed(2)}万`
+  return String(Math.round(v))
+}
+
+function fmtNum(v: number | null | undefined, digits = 2): string {
+  if (v == null || Number.isNaN(v)) return '—'
+  return v.toFixed(digits)
+}
+
 let lastDates: string[] = []
 let lastMa5: (number | null)[] = []
 let lastMa20: (number | null)[] = []
@@ -137,7 +189,15 @@ function formatBarLine(idx: number): string {
   if (idx < 0 || idx >= series.length) return ''
   const k = series[idx]
   const d = formatStamp(lastDates[idx] ?? k.date)
-  return `${d}  开盘 ${fmtPrice(k.open)}  收盘 ${fmtPrice(k.close)}  最高 ${fmtPrice(k.high)}  最低 ${fmtPrice(k.low)}  |  MA5 ${fmtPrice(lastMa5[idx])}  MA20 ${fmtPrice(lastMa20[idx])}  MA60 ${fmtPrice(lastMa60[idx])}`
+  let s = `${d}  开盘 ${fmtPrice(k.open)}  收盘 ${fmtPrice(k.close)}  最高 ${fmtPrice(k.high)}  最低 ${fmtPrice(k.low)}`
+  // 均线同样跟随勾选，未勾选就不显示（数组为空会渲染成 "—"）
+  const ind = getIndicators()
+  const mas: string[] = []
+  if (ind.ma5) mas.push(`MA5 ${fmtPrice(lastMa5[idx])}`)
+  if (ind.ma20) mas.push(`MA20 ${fmtPrice(lastMa20[idx])}`)
+  if (ind.ma60) mas.push(`MA60 ${fmtPrice(lastMa60[idx])}`)
+  if (mas.length) s += `  |  ${mas.join('  ')}`
+  return s
 }
 
 function setBarInfoByIndex(idx: number) {
@@ -174,25 +234,30 @@ function buildOption() {
     {
       name: 'K线', type: 'candlestick', data: ohlc,
       xAxisIndex: 0, yAxisIndex: 0, z: 3,
+      // 对齐 chan.py draw_klu(rugd=True)：涨红跌绿；
+      // 阳线 fill=False（空心，只描边），阴线 fill=True（实心）
       itemStyle: {
-        color: '#f85149', color0: '#3fb950',
-        borderColor: '#f85149', borderColor0: '#3fb950'
+        color: 'transparent', color0: COLOR_DOWN,
+        borderColor: COLOR_UP, borderColor0: COLOR_DOWN,
+        borderWidth: 1,
       }
     }
   ]
-  if (ind.ma5) { legendData.push('MA5'); seriesList.push({ name: 'MA5', ...lineSeriesOpts, data: ma5, lineStyle: { width: 1, color: '#f0b429' }, emphasis: { disabled: true } }) }
-  if (ind.ma20) { legendData.push('MA20'); seriesList.push({ name: 'MA20', ...lineSeriesOpts, data: ma20, lineStyle: { width: 1, color: '#58a6ff' }, emphasis: { disabled: true } }) }
-  if (ind.ma60) { legendData.push('MA60'); seriesList.push({ name: 'MA60', ...lineSeriesOpts, data: ma60, lineStyle: { width: 1, color: '#bc8cff' }, emphasis: { disabled: true } }) }
+  // 白底上均线要压深一档（原来那套亮黄/亮蓝/亮紫在白纸上发飘）
+  if (ind.ma5) { legendData.push('MA5'); seriesList.push({ name: 'MA5', ...lineSeriesOpts, data: ma5, lineStyle: { width: 1, color: '#d97706' }, emphasis: { disabled: true } }) }
+  if (ind.ma20) { legendData.push('MA20'); seriesList.push({ name: 'MA20', ...lineSeriesOpts, data: ma20, lineStyle: { width: 1, color: '#2563eb' }, emphasis: { disabled: true } }) }
+  if (ind.ma60) { legendData.push('MA60'); seriesList.push({ name: 'MA60', ...lineSeriesOpts, data: ma60, lineStyle: { width: 1, color: '#7c3aed' }, emphasis: { disabled: true } }) }
 
   const subs = activeSubPanels(ind, seriesKlines.length)
   const grids: Record<string, unknown>[] = []
   const xAxes: Record<string, unknown>[] = []
   const yAxes: Record<string, unknown>[] = []
+  panelSepTops = []
 
   if (subs.length === 0) {
-    grids.push({ left: 10, right: 10, top: MAIN_TOP, bottom: 40 })
+    grids.push({ left: AXIS_LEFT, right: AXIS_RIGHT, top: MAIN_TOP, bottom: 40 })
   } else {
-    grids.push({ left: 10, right: 10, top: MAIN_TOP, height: MAIN_HEIGHT })
+    grids.push({ left: AXIS_LEFT, right: AXIS_RIGHT, top: MAIN_TOP, height: MAIN_HEIGHT })
   }
 
   xAxes.push({
@@ -200,21 +265,23 @@ function buildOption() {
     data: dates,
     gridIndex: 0,
     boundaryGap: true,
-    axisLine: { lineStyle: { color: '#30363d' } },
+    axisLine: { lineStyle: { color: AXIS_LINE } },
     axisTick: { show: false },
     axisLabel: {
-      color: '#7d8590', fontSize: 10, interval: 'auto' as const, show: subs.length === 0,
+      color: AXIS_LABEL, fontSize: 10, interval: 'auto' as const, show: subs.length === 0,
       formatter: (v: string) => formatAxisLabel(v),
     },
     splitLine: { show: false },
+    // 时间只在 tooltip 顶部显示一次，坐标轴上的十字线标签不显示
+    axisPointer: { label: { show: false } },
   })
   yAxes.push({
     scale: true,
     gridIndex: 0,
     axisLine: { show: false },
     axisTick: { show: false },
-    splitLine: { lineStyle: { color: 'rgba(33,38,45,0.35)', type: 'dashed' } },
-    axisLabel: { color: '#7d8590', fontSize: 10 },
+    splitLine: { lineStyle: { color: SPLIT_LINE, type: 'dashed' } },
+    axisLabel: { color: AXIS_LABEL, fontSize: 10 },
     axisPointer: { label: { show: true, color: '#e6edf3', backgroundColor: '#30363d' } },
   })
 
@@ -223,7 +290,9 @@ function buildOption() {
     const key = subs[i]
     const gridIndex = i + 1
     const h = SUB_PANEL_HEIGHT[key]
-    grids.push({ left: 10, right: 10, top: subTop, height: h })
+    // 分隔线落在上一个面板与当前面板之间的留白正中
+    panelSepTops.push(subTop - SUB_GAP / 2)
+    grids.push({ left: AXIS_LEFT, right: AXIS_RIGHT, top: subTop, height: h })
     subTop += h + SUB_GAP
 
     const isLastSub = i === subs.length - 1
@@ -232,13 +301,15 @@ function buildOption() {
       data: dates,
       gridIndex,
       boundaryGap: true,
-      axisLine: { lineStyle: { color: '#30363d' } },
+      axisLine: { lineStyle: { color: AXIS_LINE } },
       axisTick: { show: false },
       axisLabel: {
-        show: isLastSub, color: '#7d8590', fontSize: 9, interval: 'auto' as const,
+        show: isLastSub, color: AXIS_LABEL, fontSize: 9, interval: 'auto' as const,
         formatter: (v: string) => formatAxisLabel(v),
       },
       splitLine: { show: false },
+      // 副图只保留竖线，不显示时间（主图已经显示过了）
+      axisPointer: { label: { show: false } },
     })
 
     if (key === 'volume') {
@@ -247,9 +318,9 @@ function buildOption() {
         gridIndex,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: '#21262d', type: 'dashed' } },
+        splitLine: { lineStyle: { color: SPLIT_LINE_SUB, type: 'dashed' } },
         axisLabel: {
-          color: '#7d8590',
+          color: AXIS_LABEL,
           fontSize: 9,
           formatter: (v: number) => {
             if (v >= 1e8) return `${(v / 1e8).toFixed(1)}亿`
@@ -280,12 +351,12 @@ function buildOption() {
         gridIndex,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: '#21262d', type: 'dashed' } },
-        axisLabel: { color: '#7d8590', fontSize: 9 },
+        splitLine: { lineStyle: { color: SPLIT_LINE_SUB, type: 'dashed' } },
+        axisLabel: { color: AXIS_LABEL, fontSize: 9 },
       })
       seriesList.push(
         { name: 'DIF', type: 'line', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: dif, lineStyle: { color: '#58a6ff', width: 1 }, showSymbol: false,
-          markLine: { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: '#7d8590', width: 1, opacity: 0.55 }, data: [{ yAxis: 0 }] } },
+          markLine: { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: POINTER_LINE, width: 1, opacity: 0.55 }, data: [{ yAxis: 0 }] } },
         { name: 'DEA', type: 'line', xAxisIndex: gridIndex, yAxisIndex: gridIndex, data: dea, lineStyle: { color: '#d29922', width: 1 }, showSymbol: false },
         // 正负分两条 series 只为上色：负值必须保持负号，否则会被画到 0 轴上方。
         // 两条同 stack 才会落在同一槽位（不 stack 时 ECharts 会把它们并排错开）。
@@ -302,8 +373,8 @@ function buildOption() {
         gridIndex,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: '#21262d', type: 'dashed' } },
-        axisLabel: { color: '#7d8590', fontSize: 9 },
+        splitLine: { lineStyle: { color: SPLIT_LINE_SUB, type: 'dashed' } },
+        axisLabel: { color: AXIS_LABEL, fontSize: 9 },
       })
       seriesList.push({
         name: 'RSI',
@@ -320,7 +391,7 @@ function buildOption() {
           data: [
             { yAxis: 70, lineStyle: { color: COLOR_UP, opacity: 0.5 }, label: { show: false } },
             { yAxis: 30, lineStyle: { color: COLOR_DOWN, opacity: 0.5 }, label: { show: false } },
-            { yAxis: 50, lineStyle: { color: '#484f58', opacity: 0.3 }, label: { show: false } },
+            { yAxis: 50, lineStyle: { color: POINTER_LINE, opacity: 0.35 }, label: { show: false } },
           ],
         },
       })
@@ -335,8 +406,8 @@ function buildOption() {
         gridIndex,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: '#21262d', type: 'dashed' } },
-        axisLabel: { color: '#7d8590', fontSize: 9 },
+        splitLine: { lineStyle: { color: SPLIT_LINE_SUB, type: 'dashed' } },
+        axisLabel: { color: AXIS_LABEL, fontSize: 9 },
       })
       seriesList.push(
         {
@@ -355,7 +426,7 @@ function buildOption() {
             data: [
               { yAxis: 80, lineStyle: { color: COLOR_UP, opacity: 0.45 }, label: { show: false } },
               { yAxis: 20, lineStyle: { color: COLOR_DOWN, opacity: 0.45 }, label: { show: false } },
-              { yAxis: 50, lineStyle: { color: '#484f58', opacity: 0.25 }, label: { show: false } },
+              { yAxis: 50, lineStyle: { color: POINTER_LINE, opacity: 0.3 }, label: { show: false } },
             ],
           },
         },
@@ -377,15 +448,18 @@ function buildOption() {
 
   return {
     animation: false,
+    // 浏览器里主图渲染出来是白底，这里显式写死白色，配色才与之一致
+    backgroundColor: CHART_BG,
     legend: {
       data: legendData,
       top: 2, left: 'center',
-      textStyle: { color: '#7d8590', fontSize: 11 },
+      textStyle: { color: AXIS_LABEL, fontSize: 11 },
       itemWidth: 14, itemHeight: 8
     },
     grid: grids,
     xAxis: xAxes,
     yAxis: yAxes,
+    graphic: buildPanelSeparators(),
     dataZoom: [
       { type: 'inside', xAxisIndex: xAxisIndexes, start: 70, end: 100 },
       {
@@ -395,17 +469,23 @@ function buildOption() {
         end: 100,
         height: SLIDER_HEIGHT,
         bottom: SLIDER_BOTTOM,
-        borderColor: '#30363d',
+        borderColor: AXIS_LINE,
         fillerColor: 'rgba(88,166,255,0.1)',
         handleStyle: { color: '#58a6ff' },
-        textStyle: { color: '#7d8590' },
+        textStyle: { color: AXIS_LABEL },
       },
     ],
     series: seriesList,
     tooltip: {
-      trigger: 'axis', axisPointer: {
+      trigger: 'axis',
+      // 指标浮框固定在主图左上角：跟随鼠标会遮住 K 线，且副图指标值一多就到处跳
+      confine: true,
+      position: () => [AXIS_LEFT + 6, MAIN_TOP + 6],
+      transitionDuration: 0,
+      extraCssText: 'max-width:340px;box-shadow:0 2px 10px rgba(0,0,0,0.35);',
+      axisPointer: {
         type: 'cross',
-        lineStyle: { color: '#484f58' },
+        lineStyle: { color: POINTER_LINE },
         label: {
           show: true, backgroundColor: '#30363d', color: '#e6edf3',
           formatter: (p: { axisDimension?: string; value?: unknown }) => {
@@ -425,8 +505,9 @@ function buildOption() {
         if (idx == null || idx < 0 || idx >= seriesKlines.length) return ''
         const k = seriesKlines[idx]
         const d = formatStamp(k.date)
+        // A股/港股口径：涨=红、跌=绿。这里必须用常量，不要手写反。
         const change = k.close >= k.open
-        const changeColor = change ? '#3fb950' : '#f85149'
+        const changeColor = change ? COLOR_UP : COLOR_DOWN
         const changePct = k.open > 0 ? ((k.close - k.open) / k.open * 100) : 0
 
         let html = `<div style="font-weight:600;margin-bottom:8px;border-bottom:1px solid #30363d;padding-bottom:6px">${d}</div>`
@@ -445,17 +526,59 @@ function buildOption() {
         html += `涨跌幅 ${change ? '+' : ''}${changePct.toFixed(2)}%`
         html += `</div>`
 
-        // 均线
-        html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #30363d">`
-        html += `<div style="margin-bottom:4px;color:#7d8590">均线</div>`
-        html += `<span style="color:#f0b429">●</span> MA5 ${fmtPrice(ma5[idx])}　`
-        html += `<span style="color:#58a6ff">●</span> MA20 ${fmtPrice(ma20[idx])}　`
-        html += `<span style="color:#bc8cff">●</span> MA60 ${fmtPrice(ma60[idx])}`
-        html += `</div>`
+        // 均线：只显示勾选了的（未勾选时 ma 数组为空，不能无条件渲染）
+        const maRows: string[] = []
+        if (ind.ma5) maRows.push(`<span style="color:#f0b429">●</span> MA5 ${fmtPrice(ma5[idx])}`)
+        if (ind.ma20) maRows.push(`<span style="color:#58a6ff">●</span> MA20 ${fmtPrice(ma20[idx])}`)
+        if (ind.ma60) maRows.push(`<span style="color:#bc8cff">●</span> MA60 ${fmtPrice(ma60[idx])}`)
+        if (maRows.length) {
+          html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #30363d">`
+          html += `<div style="margin-bottom:4px;color:#7d8590">均线</div>`
+          html += maRows.join('　')
+          html += `</div>`
+        }
+
+        // 副图指标：与主图同一根 bar 的数值（索引与 dates 对齐）
+        const subRows: string[] = []
+        if (ind.volume) {
+          subRows.push(`<span style="color:#7d8590">●</span> 成交量 <b>${fmtVol(k.volume)}</b>`)
+        }
+        if (ind.macd && indData.macd) {
+          const dif = indData.macd.dif?.[idx] ?? null
+          const dea = indData.macd.dea?.[idx] ?? null
+          const barVal = dif != null && dea != null ? (dif - dea) * 2 : null
+          const barColor = barVal == null ? '#e6edf3' : barVal >= 0 ? COLOR_UP : COLOR_DOWN
+          subRows.push(
+            `<span style="color:#38bdf8">●</span> MACD DIF ${fmtNum(dif, 3)}　` +
+            `<span style="color:#d29922">●</span> DEA ${fmtNum(dea, 3)}　` +
+            `柱 <b style="color:${barColor}">${fmtNum(barVal, 3)}</b>`
+          )
+        }
+        if (ind.rsi && indData.rsi) {
+          subRows.push(`<span style="color:#f59e0b">●</span> RSI ${fmtNum(indData.rsi[idx] ?? null, 2)}`)
+        }
+        if (ind.skdj && indData.sk && indData.sd) {
+          subRows.push(
+            `<span style="color:#a78bfa">●</span> SKDJ K ${fmtNum(indData.sk[idx] ?? null, 2)}　` +
+            `D ${fmtNum(indData.sd[idx] ?? null, 2)}`
+          )
+        }
+        if (subRows.length) {
+          html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #30363d">`
+          html += `<div style="margin-bottom:4px;color:#7d8590">副图指标</div>`
+          html += subRows.map(r => `<div>${r}</div>`).join('')
+          html += `</div>`
+        }
 
         return html
       }
-    }
+    },
+    // 关键：把所有面板的 x 轴联动起来，鼠标在主图上移动时，
+    // 竖线会贯穿主图与全部副图（否则十字线只出现在鼠标所在的那个 grid）。
+    axisPointer: {
+      link: [{ xAxisIndex: 'all' }],
+      label: { backgroundColor: '#30363d' },
+    },
   }
 }
 
@@ -485,7 +608,7 @@ function applyChanlunGraphic() {
   if (!chart) return
   const data = chanlunOverlayCache
   if (!data || data._n <= 0 || !lastDates.length) {
-    chart.setOption({ graphic: [] }, { replaceMerge: ['graphic'] })
+    chart.setOption({ graphic: buildPanelSeparators() }, { replaceMerge: ['graphic'] })
     return
   }
 
@@ -516,8 +639,12 @@ function applyChanlunGraphic() {
     priceAtIdx: i => displayKlines.value[i]?.close ?? 0,
   })
 
+  // replaceMerge 会整组替换 graphic，必须把面板分隔线一起写回，否则会被擦掉
   chart.setOption({
-    graphic: [{ id: 'chanlun-overlay', type: 'group', children, z: 100, silent: true }]
+    graphic: [
+      { id: 'chanlun-overlay', type: 'group', children, z: 100, silent: true },
+      ...buildPanelSeparators(),
+    ]
   }, { replaceMerge: ['graphic'] })
 }
 
@@ -560,6 +687,9 @@ function initChart() {
   if (!chartRef.value) return
   chart = echarts.init(chartRef.value)
   chart.setOption(buildOption())
+  // 首屏 props 已有数据时 watch 不会触发，这里必须先建一次叠加层缓存，
+  // 否则 graphic 永远是空（合并K线/笔/中枢全都不画）。
+  syncChanlunOverlayCache()
   setBarInfoByIndex(displayKlines.value.length - 1)
   chart.getZr().on('globalout', onChartGlobalOut)
   chart.on('updateAxisPointer', onAxisPointerUpdate)
@@ -604,6 +734,7 @@ function syncChanlunOverlayCache() {
   chanlunOverlayCache = buildChanlunOverlayCache({
     dates,
     seriesKlines,
+    mergedKlines: props.mergedKlines,
     bis: props.bis,
     xians: props.xians,
     zhongshus: props.zhongshus,
@@ -611,6 +742,7 @@ function syncChanlunOverlayCache() {
     aiSignal: props.aiSignal,
     supportResistance: props.supportResistance,
     flags: {
+      mergedKlines: ind.mergedKlines,
       bis: ind.bis,
       xians: ind.xians,
       zhongshus: ind.zhongshus,
@@ -680,7 +812,10 @@ watch(
 )
 
 watch(
-  () => [props.bis, props.zhongshus, props.signals, props.xians, props.aiSignal, props.supportResistance],
+  () => [
+    props.mergedKlines,
+    props.bis, props.zhongshus, props.signals, props.xians, props.aiSignal, props.supportResistance,
+  ],
   updateOverlayOnly,
   { deep: true }
 )
@@ -688,6 +823,7 @@ watch(
 /** 缠论/AI 线等仅影响 graphic，不必重建 K 线 series */
 watch(
   () => [
+    props.indicators?.mergedKlines,
     props.indicators?.bis,
     props.indicators?.xians,
     props.indicators?.zhongshus,
@@ -725,14 +861,16 @@ watch(chartHeightPx, () => {
 <style scoped>
 .kline-wrap {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 12px;
   overflow: hidden;
-  background: var(--bg-card);
+  /* 与 ECharts 的 backgroundColor 一致：图表区是白底 */
+  background: #ffffff;
 }
 .kline-chart {
   width: 100%;
   min-height: 420px;
+  background: #ffffff;
   opacity: 0;
   transition: opacity 0.22s ease;
 }
@@ -741,8 +879,9 @@ watch(chartHeightPx, () => {
   padding: 8px 12px 10px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-secondary, #7d8590);
-  border-top: 1px solid var(--border);
+  /* 白底卡片上用深灰，别用深色主题的 --text-secondary */
+  color: #57606a;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
   font-variant-numeric: tabular-nums;
   word-break: break-all;
 }
@@ -764,7 +903,7 @@ watch(chartHeightPx, () => {
 .sk-bar {
   height: 10px;
   border-radius: 4px;
-  background: var(--border);
+  background: #e5e7eb;
   animation: shimmer 1.4s ease-in-out infinite;
 }
 .sk-w-20 { width: 20%; }
@@ -781,7 +920,7 @@ watch(chartHeightPx, () => {
 .sk-candle {
   flex: 1;
   border-radius: 2px 2px 0 0;
-  background: var(--text-muted);
+  background: #c9ced6;
   animation: shimmer 1.4s ease-in-out infinite;
   animation-delay: calc(var(--i, 0) * 30ms);
 }

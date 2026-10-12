@@ -25,6 +25,7 @@
       <div class="chart-section">
         <MobileKLineChart
           :klines="store.klines"
+          :merged-klines="store.chanlunResult?.merged_klines || []"
           :bis="store.chanlunResult?.bis || []"
           :xians="store.chanlunResult?.xians || []"
           :zhongshus="store.chanlunResult?.zhongshus || []"

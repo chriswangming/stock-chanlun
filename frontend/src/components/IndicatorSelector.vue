@@ -49,6 +49,15 @@
             <label class="indicator-item">
               <input
                 type="checkbox"
+                :checked="indicators.mergedKlines"
+                @change="store.toggleIndicator('mergedKlines')"
+              />
+              <span class="indicator-dot" style="background: linear-gradient(90deg, #f85149, #3fb950); border: 1px solid #6e7681"></span>
+              <span>合并K线</span>
+            </label>
+            <label class="indicator-item">
+              <input
+                type="checkbox"
                 :checked="indicators.bis"
                 @change="store.toggleIndicator('bis')"
               />

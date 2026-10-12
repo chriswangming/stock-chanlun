@@ -1,49 +1,49 @@
-/* ── ChanStock 设计系统 v2 — 深色交易终端风格 ─────────────────────────────── */
+/* ── ChanStock 设计系统 v2 — 默认白色（浅色）主题 ─────────────────────────── */
 
 :root {
-  /* 背景层级 */
-  --bg-base: #06080c;
-  --bg-primary: #0b0f14;
-  --bg-elevated: #111820;
-  --bg-secondary: #151c26;
-  --bg-card: #1a222d;
-  --bg-card-hover: #1f2835;
-  --bg-hover: #252f3d;
+  /* 背景层级（白底） */
+  --bg-base: #ffffff;
+  --bg-primary: #ffffff;
+  --bg-elevated: #f7f9fc;
+  --bg-secondary: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --bg-hover: #eef2f7;
 
   /* 描边与分隔 */
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.12);
-  --divider: rgba(255, 255, 255, 0.06);
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --divider: rgba(0, 0, 0, 0.07);
 
   /* 文字 */
-  --text-primary: #f0f4f8;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
 
   /* 行情色（A 股习惯：涨红跌绿） */
-  --accent-green: #22c55e;
-  --accent-red: #ef4444;
-  --accent-amber: #f59e0b;
-  --accent-blue: #38bdf8;
-  --accent-purple: #a78bfa;
-  --accent-cyan: #2dd4bf;
+  --accent-green: #16a34a;
+  --accent-red: #dc2626;
+  --accent-amber: #d97706;
+  --accent-blue: #0369a1;
+  --accent-purple: #7c3aed;
+  --accent-cyan: #0891b2;
 
   /* 品牌渐变（导航 Logo） */
-  --brand-from: #4ade80;
-  --brand-via: #34d399;
-  --brand-to: #2dd4bf;
+  --brand-from: #10b981;
+  --brand-via: #059669;
+  --brand-to: #047857;
 
   /* 强调光晕 */
-  --glow-brand: rgba(52, 211, 153, 0.35);
-  --glow-blue: rgba(56, 189, 248, 0.2);
+  --glow-brand: rgba(16, 185, 129, 0.25);
+  --glow-blue: rgba(3, 105, 161, 0.12);
 
   /* 圆角与阴影 */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.45);
-  --shadow-glow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 12px 40px -12px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-glow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 16px -4px rgba(0, 0, 0, 0.1);
 
   --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-display: 'Outfit', var(--font-sans);
@@ -53,15 +53,52 @@
   --tabbar-height: 60px;
 }
 
-/* 亮色主题 */
+/* 深色主题（仅当用户显式切换到 dark 时生效） */
+[data-theme="dark"] {
+  --bg-base: #06080c;
+  --bg-primary: #0b0f14;
+  --bg-elevated: #111820;
+  --bg-secondary: #151c26;
+  --bg-card: #1a222d;
+  --bg-card-hover: #1f2835;
+  --bg-hover: #252f3d;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.06);
+
+  --text-primary: #f0f4f8;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-amber: #f59e0b;
+  --accent-blue: #38bdf8;
+  --accent-purple: #a78bfa;
+  --accent-cyan: #2dd4bf;
+
+  --brand-from: #4ade80;
+  --brand-via: #34d399;
+  --brand-to: #2dd4bf;
+
+  --glow-brand: rgba(52, 211, 153, 0.35);
+  --glow-blue: rgba(56, 189, 248, 0.2);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 12px 40px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* 亮色主题（与默认一致，供显式切换使用） */
 [data-theme="light"] {
-  --bg-base: #f8fafc;
+  --bg-base: #ffffff;
   --bg-primary: #ffffff;
-  --bg-elevated: #f0f4f8;
+  --bg-elevated: #f7f9fc;
   --bg-secondary: #f1f5f9;
   --bg-card: #ffffff;
   --bg-card-hover: #f8fafc;
-  --bg-hover: #e8edf2;
+  --bg-hover: #eef2f7;
 
   --border: rgba(0, 0, 0, 0.1);
   --border-strong: rgba(0, 0, 0, 0.16);
@@ -101,8 +138,8 @@ html {
 body {
   background-color: var(--bg-base);
   background-image:
-    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(16,185,129,0.04) 0%, transparent 55%),
-    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(56,189,248,0.03) 0%, transparent 45%),
+    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(16,185,129,0.05) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(3,105,161,0.04) 0%, transparent 45%),
     linear-gradient(180deg, var(--bg-base) 0%, var(--bg-primary) 35%, var(--bg-base) 100%);
   background-attachment: fixed;
   color: var(--text-primary);
@@ -169,7 +206,7 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
 .btn-primary {
   background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(2, 132, 199, 0.6);
   box-shadow: 0 2px 12px rgba(14, 165, 233, 0.35);
 }
 .btn-primary:hover {
@@ -177,7 +214,7 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
   box-shadow: 0 4px 20px rgba(14, 165, 233, 0.45);
 }
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   border-color: var(--border);
 }
@@ -189,11 +226,11 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
 .btn-danger {
   background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(220, 38, 38, 0.6);
 }
 .btn-success {
   background: linear-gradient(135deg, var(--accent-green) 0%, #16a34a 100%);
-  color: #0a0f0d;
+  color: #fff;
   font-weight: 700;
 }
 
@@ -281,7 +318,7 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
   display: flex;
   gap: 6px;
   padding: 4px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-secondary);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
@@ -295,14 +332,14 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
   transition: color 0.15s ease, background 0.15s ease;
 }
 .nav-link:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 .nav-link.router-link-active,
 .nav-link.active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.18) 0%, rgba(52, 211, 153, 0.12) 100%);
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.25);
+  background: linear-gradient(135deg, rgba(3, 105, 161, 0.1) 0%, rgba(5, 150, 105, 0.08) 100%);
+  color: var(--accent-blue);
+  box-shadow: inset 0 0 0 1px rgba(3, 105, 161, 0.22);
 }
 
 /* ── Level selector ─────────────────────────── */
@@ -329,13 +366,13 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
 }
 .level-tab:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-hover);
 }
 .level-tab.active {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(52, 211, 153, 0.12) 100%);
+  background: linear-gradient(135deg, rgba(3, 105, 161, 0.1) 0%, rgba(5, 150, 105, 0.08) 100%);
   color: var(--accent-cyan);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(3, 105, 161, 0.22);
 }
 
 /* ── Price display ───────────────────────────── */
