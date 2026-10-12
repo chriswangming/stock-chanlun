@@ -132,6 +132,9 @@ class _Combiner:
 
     def update_fx(self, pre, nxt, exclude_included: bool = False,
                   allow_top_equal: Optional[int] = None):
+        # allow_top_equal = None普通模式
+        # allow_top_equal = 1 被包含，顶部相等不合并
+        # allow_top_equal = -1 被包含，底部相等不合并
         """根据左右邻居判定顶/底分型。"""
         self.next = nxt
         self.pre = pre

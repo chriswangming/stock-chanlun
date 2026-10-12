@@ -1,3 +1,4 @@
+"""买卖点（SignalDetector / BSPointList）行为测试。"""
 import os
 import sys
 import unittest
@@ -7,127 +8,115 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from chanlun.elements import Bi, BuySellPoint, Zhongshu
-from chanlun.signals import SignalDetector
+import pandas as pd
+
+from chanlun.config import BSPConfig, BSPointConfig, ChanlunConfig
+from chanlun.elements import Bi, BuySellPoint
+from chanlun.engine import ChanlunEngine
+from chanlun.signals import SignalDetector, _main_name
+
+FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "chan_reference.json")
+
+
+def _fixture_df() -> pd.DataFrame:
+    import json
+    with open(FIXTURE) as f:
+        data = json.load(f)
+    return pd.DataFrame([
+        {
+            "date": datetime.strptime(r[0], "%Y-%m-%d"),
+            "open": float(r[1]), "high": float(r[2]),
+            "low": float(r[3]), "close": float(r[4]),
+            "volume": 1000.0,
+        }
+        for r in data["klines"]
+    ])
 
 
 class SignalDetectorTests(unittest.TestCase):
     def setUp(self):
         self.t0 = datetime(2026, 1, 1, 9, 30)
 
-    def _bi(self, idx: int, direction: str, start_minutes: int, end_minutes: int, high: float, low: float) -> Bi:
-        start = self.t0 + timedelta(minutes=start_minutes)
-        end = self.t0 + timedelta(minutes=end_minutes)
-        return Bi(
-            id=f"bi_{idx}",
-            start=start,
-            end=end,
-            direction=direction,
-            high=high,
-            low=low,
-            start_price=low if direction == "up" else high,
-            end_price=high if direction == "up" else low,
-        )
+    # ── 类型命名 ──────────────────────────────────
+    def test_main_type_naming(self):
+        self.assertEqual(_main_name("1", True), "一买")
+        self.assertEqual(_main_name("1p", True), "一买")
+        self.assertEqual(_main_name("2", False), "二卖")
+        self.assertEqual(_main_name("2s", False), "二卖")
+        self.assertEqual(_main_name("3a", True), "三买")
+        self.assertEqual(_main_name("3b", False), "三卖")
 
-    def test_detect_2nd_buy_uses_bi_end_time_after_first_buy(self):
+    # ── 缺内部结构时不出假信号 ─────────────────────
+    def test_detect_all_without_internal_context_returns_empty(self):
         detector = SignalDetector(bis=[], segments=[], zhongshus=[], level="daily")
-        first_buy_time = self.t0 + timedelta(minutes=30)
-        first_buy = BuySellPoint(
-            type="一买",
-            level="daily",
-            price=100.0,
-            datetime=first_buy_time,
-            confidence=0.8,
-        )
+        self.assertEqual(detector.detect_all(), [])
 
-        # 起点早于一买，但终点晚于一买，应该被纳入候选
-        crossing_bi = self._bi(
-            idx=1,
-            direction="down",
-            start_minutes=20,
-            end_minutes=35,
-            high=103.0,
-            low=98.5,
-        )
-        detector.bis = [crossing_bi]
+    # ── 端到端：chan.py 自带日线样例 ────────────────
+    def _analyze(self, **bsp_conf):
+        cfg = ChanlunConfig()
+        cfg.bsp = BSPConfig(buy=BSPointConfig(**bsp_conf),
+                            sell=BSPointConfig(**bsp_conf))
+        return ChanlunEngine(_fixture_df(), config=cfg).analyze(level="daily")
 
-        signals = detector._detect_2nd_buy([first_buy])
-        self.assertEqual(len(signals), 1)
-        self.assertEqual(signals[0].type, "二买")
-        self.assertEqual(signals[0].datetime, crossing_bi.end)
+    def test_signals_follow_chan_py_on_fixture(self):
+        """chan.py 在同样数据 + min_zs_cnt=0 下给出 6 个买卖点，主类型序列须一致。"""
+        result = self._analyze(min_zs_cnt=0)
+        got = [(s.type, s.datetime) for s in result.signals]
+        self.assertEqual([t for t, _ in got],
+                         ["一卖", "二卖", "一买", "二买", "二买", "一卖"])
+        # 时间递增
+        self.assertEqual([d for _, d in got], sorted(d for _, d in got))
 
-    def test_detect_3rd_buy_uses_latest_breakout_zhongshu(self):
-        detector = SignalDetector(bis=[], segments=[], zhongshus=[], level="daily")
+    def test_buy_price_is_bi_end_low_and_sell_is_bi_end_high(self):
+        result = self._analyze(min_zs_cnt=0)
+        bi_by_end = {b.end: b for b in result.bis}
+        for sig in result.signals:
+            bi = bi_by_end[sig.datetime]
+            if "买" in sig.type:
+                self.assertAlmostEqual(sig.price, bi.low, places=6)
+            else:
+                self.assertAlmostEqual(sig.price, bi.high, places=6)
 
-        older = Zhongshu(
-            id="zs_old",
-            start=self.t0,
-            end=self.t0 + timedelta(minutes=30),
-            range_high=100.0,
-            range_low=95.0,
-            xian_ids=["x1", "x2", "x3"],
-            level=2,
-        )
-        latest = Zhongshu(
-            id="zs_latest",
-            start=self.t0 + timedelta(minutes=40),
-            end=self.t0 + timedelta(minutes=60),
-            range_high=110.0,
-            range_low=106.0,
-            xian_ids=["x4", "x5", "x6"],
-            level=2,
-        )
+    def test_signal_confidence_and_stop_loss_in_valid_range(self):
+        result = self._analyze(min_zs_cnt=0)
+        self.assertTrue(result.signals)
+        for sig in result.signals:
+            self.assertGreaterEqual(sig.confidence, 0.0)
+            self.assertLessEqual(sig.confidence, 1.0)
+            self.assertIsNotNone(sig.stop_loss)
+            if "买" in sig.type:
+                self.assertLess(sig.stop_loss, sig.price)
+                self.assertGreater(sig.take_profit, sig.price)
+            else:
+                self.assertGreater(sig.stop_loss, sig.price)
+                self.assertLess(sig.take_profit, sig.price)
+            self.assertTrue(sig.description)
 
-        # 先有向上突破，再有回踩但不破中枢上沿 => 三买成立
-        break_up = self._bi(
-            idx=2,
-            direction="up",
-            start_minutes=65,
-            end_minutes=75,
-            high=112.5,
-            low=107.0,
-        )
-        retest = self._bi(
-            idx=3,
-            direction="down",
-            start_minutes=76,
-            end_minutes=84,
-            high=111.5,
-            low=110.3,
-        )
+    def test_default_config_needs_at_least_one_zhongshu(self):
+        """默认配置 min_zs_cnt=1：中枢不够的段不会产生一类买卖点。"""
+        result = self._analyze()
+        self.assertEqual([s.type for s in result.signals], ["一卖"])
 
-        detector.zhongshus = [older, latest]
-        detector.bis = [break_up, retest]
+    def test_bsp_type_filter_narrows_signals(self):
+        result = self._analyze(bs_type="1,1p", min_zs_cnt=0)
+        self.assertEqual([s.type for s in result.signals], ["一卖", "一买", "一卖"])
 
-        signals = detector._detect_3rd_buy()
-        self.assertEqual(len(signals), 1)
-        self.assertEqual(signals[0].type, "三买")
-        self.assertEqual(signals[0].stop_loss, latest.range_low)
-        self.assertIn("zs_latest", latest.id)
-
+    # ── 支撑阻力（不依赖内部结构） ──────────────────
     def test_detect_support_resistance_dedup_keeps_stronger_level(self):
         detector = SignalDetector(bis=[], segments=[], zhongshus=[], level="daily")
         shared_price = 10.123
 
-        # 同价位（两位小数后相同）来源冲突时，应保留更高强度
         weak_signal = BuySellPoint(
-            type="一买",
-            level="daily",
-            price=shared_price,
-            datetime=self.t0 + timedelta(minutes=10),
-            confidence=0.6,
+            type="一买", level="daily", price=shared_price,
+            datetime=self.t0 + timedelta(minutes=10), confidence=0.6,
         )
         strong_signal = BuySellPoint(
-            type="三买",
-            level="daily",
-            price=10.124,  # 与 10.123 按两位小数同 key
-            datetime=self.t0 + timedelta(minutes=20),
-            confidence=0.9,
+            type="三买", level="daily", price=10.124,  # 与 10.123 按两位小数同 key
+            datetime=self.t0 + timedelta(minutes=20), confidence=0.9,
         )
 
         levels = detector.detect_support_resistance(
-            klines=[],
-            signals=[weak_signal, strong_signal],
+            klines=[], signals=[weak_signal, strong_signal],
         )
         support_levels = [lvl for lvl in levels if lvl.type == "support"]
         self.assertEqual(len(support_levels), 1)

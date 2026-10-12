@@ -10,6 +10,7 @@ from .elements import (
     ChanlunAnalysis, MergedKLineInfo, IncludedRaw
 )
 from .bi_detector import BiDetector
+from .macd import MACDSeries
 from .segment_detector import SegmentDetector
 from .signals import SignalDetector
 
@@ -49,13 +50,22 @@ class ChanlunEngine:
         bi_detector = BiDetector(self.raw_klines, config=self.config)
         bis = bi_detector.detect()
 
-        # 2. 线段（特征序列法）与中枢（段内中枢，基于笔的重叠）
-        seg_detector = SegmentDetector(bis, config=self.config)
+        # 2. 力度序列（MACD）—— 买卖点的背驰判定要用，必须在建笔序列前算好
+        macd_series = MACDSeries.from_bars(bi_detector.raw_bars)
+
+        # 3. 线段（特征序列法）与中枢（段内中枢，基于笔的重叠）
+        seg_detector = SegmentDetector(bis, config=self.config, macd_series=macd_series)
         segments = seg_detector.detect_segments()
         zhongshus = seg_detector.detect_zhongshus(segments)
 
-        # 5. 买卖点判定
-        sig_detector = SignalDetector(bis, segments, zhongshus, level=level)
+        # 5. 买卖点判定（chan.py BuySellPoint 口径，需要笔序列 + 段内中枢 + 力度）
+        sig_detector = SignalDetector(
+            bis, segments, zhongshus, level=level,
+            config=self.config.bsp,
+            bi_lines=seg_detector.lines,
+            seg_list=seg_detector.seg_list,
+            macd_series=macd_series,
+        )
         signals = sig_detector.detect_all()
         trend = sig_detector.detect_trend()
 

@@ -56,6 +56,12 @@ class Bi(BaseModel):
     # 线段/中枢判定用的是 is_used_to_be_sure = is_sure or used_to_be_sure
     is_sure: bool = True
     used_to_be_sure: bool = True
+    # 端点所在的原始K线下标（chan.py CBi.get_begin_klu/get_end_klu 的 idx）。
+    # 买卖点的力度（MACD 面积/峰值）要在这段区间上算，缺了就无法判定背驰。
+    start_idx: int = -1     # 笔起点极值K线
+    end_idx: int = -1       # 笔终点极值K线
+    klc_start_idx: int = -1  # 笔起点合并K线的第一根原始K线
+    klc_end_idx: int = -1    # 笔终点合并K线的最后一根原始K线
 
 
 class XianSegment(BaseModel):

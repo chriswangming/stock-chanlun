@@ -66,6 +66,11 @@ class BiDetector:
         """内部笔对象（供线段/中枢模块消费，带 pre/next 与所属括线信息）。"""
         return self._bis
 
+    @property
+    def raw_bars(self) -> list[RawBar]:
+        """清洗后的原始K线（下标即 RawBar.idx，MACD 序列按此顺序对齐）。"""
+        return self._fenxing_detector.raws
+
     # ── 主流程 ──────────────────────────────────────────────
     def detect(self) -> list[Bi]:
         """
@@ -271,6 +276,11 @@ class BiDetector:
                     end_price=float(bi.get_end_val()),
                     is_sure=bool(bi.is_sure),
                     used_to_be_sure=bool(bi.used_to_be_sure),
+                    # 端点所在的原始K线下标：买卖点算力度（MACD 面积/峰值）时需要
+                    start_idx=int(begin_klu.idx),
+                    end_idx=int(end_klu.idx),
+                    klc_start_idx=int(bi.begin_klc.lst[0].idx),
+                    klc_end_idx=int(bi.end_klc.lst[-1].idx),
                 )
             )
         return out

@@ -39,9 +39,10 @@ class Line:
     供特征序列/中枢算法消费。
     """
 
-    def __init__(self, src: Union[Bi, CBi], idx: int):
+    def __init__(self, src: Union[Bi, CBi], idx: int, macd_series=None):
         self.src = src
         self.idx = idx
+        self.macd_series = macd_series
         self.dir = UP if (src.direction if isinstance(src, Bi) else src.dir) == UP else DOWN
         # 尾部「虚笔」的确认标记：chan.py 用 is_sure / used_to_be_sure 两个标记，
         # 线段与主段的 is_sure 判定用的是 is_used_to_be_sure
@@ -71,6 +72,36 @@ class Line:
     def is_down(self) -> bool:
         return self.dir == DOWN
 
+    # ── 幅度与力度（chan.py CBi.amp / cal_macd_metric） ──
+    def amp(self) -> float:
+        return abs(self.get_end_val() - self.get_begin_val())
+
+    @property
+    def begin_klu_idx(self) -> int:
+        """笔起点极值所在原始K线下标（chan.py CBi.get_begin_klu().idx）。"""
+        idx = getattr(self.src, "start_idx", -1)
+        return int(idx) if idx is not None and idx >= 0 else self.klc_begin_idx
+
+    @property
+    def end_klu_idx(self) -> int:
+        idx = getattr(self.src, "end_idx", -1)
+        return int(idx) if idx is not None and idx >= 0 else self.klc_end_idx
+
+    @property
+    def klc_begin_idx(self) -> int:
+        idx = getattr(self.src, "klc_start_idx", -1)
+        return int(idx) if idx is not None and idx >= 0 else self.begin_klu_idx
+
+    @property
+    def klc_end_idx(self) -> int:
+        idx = getattr(self.src, "klc_end_idx", -1)
+        return int(idx) if idx is not None and idx >= 0 else self.end_klu_idx
+
+    def cal_macd_metric(self, macd_algo: str, is_reverse: bool) -> float:
+        """笔的力度（chan.py CBi.cal_macd_metric）。"""
+        from .macd import cal_macd_metric
+        return cal_macd_metric(self.macd_series, self, macd_algo, is_reverse)
+
     @property
     def is_used_to_be_sure(self) -> bool:
         return self.is_sure or self.used_to_be_sure
@@ -91,10 +122,10 @@ class Line:
         return f"line{self.idx}:{self.dir}"
 
 
-def build_lines(bis) -> list[Line]:
+def build_lines(bis, macd_series=None) -> list[Line]:
     lines: list[Line] = []
     for i, b in enumerate(bis):
-        lines.append(Line(b, i))
+        lines.append(Line(b, i, macd_series))
     for i, ln in enumerate(lines):
         ln.pre = lines[i - 1] if i > 0 else None
         ln.next = lines[i + 1] if i + 1 < len(lines) else None
@@ -158,6 +189,24 @@ class CSeg:
 
     def clear_zs_lst(self):
         self.zs_lst = []
+
+    # ── 段内中枢访问（chan.py Seg/Seg.py 同名方法） ──
+    def get_first_multi_bi_zs(self):
+        """段内最早的一个多笔中枢。"""
+        return next((zs for zs in self.zs_lst if not zs.is_one_bi_zs()), None)
+
+    def get_multi_bi_zs_lst(self) -> list:
+        return [zs for zs in self.zs_lst if not zs.is_one_bi_zs()]
+
+    def get_final_multi_bi_zs(self):
+        """段内最末（最新）的一个多笔中枢。"""
+        for zs in reversed(self.zs_lst):
+            if not zs.is_one_bi_zs():
+                return zs
+        return None
+
+    def get_multi_bi_zs_cnt(self) -> int:
+        return sum(not zs.is_one_bi_zs() for zs in self.zs_lst)
 
     def update_bi_list(self, bi_lst: list[Line], idx1: int, idx2: int):
         self.bi_list = []
@@ -736,6 +785,60 @@ class CZS:
     def uniq_bi_cnt(self) -> int:
         return self.end_bi.idx - self.begin_bi.idx + 1
 
+    # ── 进出中枢的笔（chan.py ZS/ZS.py） ──
+    def get_bi_in(self):
+        return self.bi_in
+
+    def get_bi_out(self):
+        return self.bi_out
+
+    def end_bi_break(self, end_bi=None) -> bool:
+        """出中枢笔是否突破中枢区间。"""
+        if end_bi is None:
+            end_bi = self.bi_out
+        if end_bi is None:
+            return False
+        return (end_bi.is_down() and end_bi._low() < self.low) or \
+            (end_bi.is_up() and end_bi._high() > self.high)
+
+    def is_divergence(self, config, out_bi=None):
+        """
+        背驰判定（chan.py ZS/ZS.py）：出中枢笔力度 <= divergence_rate * 进中枢笔力度。
+        返回 (是否背驰, 力度比)。
+        """
+        if not self.end_bi_break(out_bi):  # 出中枢笔必须突破中枢
+            return False, None
+        in_bi = self.bi_in
+        if in_bi is None:
+            return False, None
+        if out_bi is None:
+            out_bi = self.bi_out
+        if out_bi is None:
+            return False, None
+        in_metric = in_bi.cal_macd_metric(config.macd_algo, is_reverse=False)
+        out_metric = out_bi.cal_macd_metric(config.macd_algo, is_reverse=True)
+        in_metric = in_metric if in_metric else 1e-7
+        if config.divergence_rate > 100:  # 保送
+            return True, out_metric / in_metric
+        return out_metric <= config.divergence_rate * in_metric, out_metric / in_metric
+
+    def out_bi_is_peak(self, end_bi_idx: int):
+        """出中枢笔是否是中枢区间内的极值点（chan.py ZS/ZS.py）。"""
+        if len(self.bi_lst) == 0 or self.bi_out is None:
+            return False, None
+        peak_rate = float("inf")
+        for bi in self.bi_lst:
+            if bi.idx > end_bi_idx:
+                break
+            if (self.bi_out.is_down() and bi._low() < self.bi_out._low()) or \
+               (self.bi_out.is_up() and bi._high() > self.bi_out._high()):
+                return False, None
+            end_val = self.bi_out.get_end_val()
+            r = abs(bi.get_end_val() - end_val) / end_val if end_val else float("inf")
+            if r < peak_rate:
+                peak_rate = r
+        return True, peak_rate
+
     # ── 合并 / 延伸 ──────────────────────────────
     def combine(self, zs2: "CZS", combine_mode: str) -> bool:
         if zs2.is_one_bi_zs():
@@ -962,12 +1065,27 @@ class SegmentDetector:
     且同样方向的中枢可以延伸 / 合并 —— 而不是旧实现里「三个线段围一块」。
     """
 
-    def __init__(self, bis: list[Bi], config: Optional[ChanlunConfig] = None):
+    def __init__(self, bis: list[Bi], config: Optional[ChanlunConfig] = None,
+                 macd_series=None):
         self.bis = list(bis)
         self.config = config or ChanlunConfig()
-        self._lines = build_lines(self.bis)
+        self.macd_series = macd_series
+        self._lines = build_lines(self.bis, macd_series)
         self._seg_list: Optional[SegListComm] = None
         self._zs_list: Optional[CZSList] = None
+
+    # ── 内部结构（买卖点判定需要笔序列/线段/段内中枢） ──
+    @property
+    def lines(self) -> list[Line]:
+        return self._lines
+
+    @property
+    def seg_list(self) -> Optional[SegListComm]:
+        return self._seg_list
+
+    @property
+    def zs_list(self) -> Optional[CZSList]:
+        return self._zs_list
 
     # ── 线段 ─────────────────────────────────────
     def detect_segments(self, algo: Optional[str] = None, **_deprecated) -> list[XianSegment]:

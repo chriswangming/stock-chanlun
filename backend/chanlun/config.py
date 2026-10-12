@@ -4,8 +4,9 @@
 各字段说明直接摘自 chan.py README「CChanConfig 配置」章节。
 """
 
+import math
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Optional
 
 
 @dataclass
@@ -63,8 +64,63 @@ class ZSConfig:
     zs_algo: Literal["normal", "over_seg", "auto"] = "normal"
 
 
+# chan.py BuySellPoint/BSPointConfig.py：买卖点参数（买/卖各一套）
+BSP_TYPES = ("1", "1p", "2", "2s", "3a", "3b")
+
+
+@dataclass
+class BSPointConfig:
+    """单侧（买或卖）买卖点配置 —— 字段语义与默认值同 chan.py CPointConfig。"""
+
+    # 背驰阈值：出中枢笔力度 / 进中枢笔力度 <= 该值才算背驰；>100 表示「保送」
+    divergence_rate: float = math.inf
+    # 线段内至少要有几个中枢，一买/一卖才算「目标买卖点」
+    min_zs_cnt: int = 1
+    # True: 只统计多笔中枢（一笔中枢不计入 min_zs_cnt）
+    bsp1_only_multibi_zs: bool = True
+    # 二买的最大回撤比例（二买笔幅度 / 突破笔幅度）
+    max_bs2_rate: float = 0.9999
+    # 力度比较算法，见 chanlun/macd.py
+    macd_algo: str = "peak"
+    # 一买/一卖是否要求出中枢笔为中枢内极值
+    bs1_peak: bool = True
+    # 参与计算的买卖点类型集合
+    bs_type: str = "1,1p,2,2s,3a,3b"
+    # 二买是否必须紧跟一买
+    bsp2_follow_1: bool = True
+    # 三买是否必须紧跟一买
+    bsp3_follow_1: bool = True
+    # 三买是否要求突破中枢极值
+    bsp3_peak: bool = False
+    # 类二买是否必须已有二买
+    bsp2s_follow_2: bool = False
+    # 类二买的最大层数，None 表示不限
+    max_bsp2s_lv: Optional[int] = None
+    # 三买是否严格要求中枢紧邻一买
+    strict_bsp3: bool = False
+    # 3a 最多考察几个中枢
+    bsp3a_max_zs_cnt: int = 1
+
+    @property
+    def target_types(self) -> tuple[str, ...]:
+        types = tuple(t.strip() for t in self.bs_type.split(",") if t.strip())
+        return types or BSP_TYPES
+
+
+@dataclass
+class BSPConfig:
+    """买卖点总配置 —— 对应 chan.py CBSPointConfig（买/卖两套）。"""
+
+    buy: BSPointConfig = field(default_factory=BSPointConfig)
+    sell: BSPointConfig = field(default_factory=BSPointConfig)
+
+    def get(self, is_buy: bool) -> BSPointConfig:
+        return self.buy if is_buy else self.sell
+
+
 @dataclass
 class ChanlunConfig:
     bi: BiConfig = field(default_factory=BiConfig)
     seg: SegConfig = field(default_factory=SegConfig)
     zs: ZSConfig = field(default_factory=ZSConfig)
+    bsp: BSPConfig = field(default_factory=BSPConfig)
