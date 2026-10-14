@@ -20,8 +20,9 @@ def chanlun_cache_key(code: str, level: str, kline_limit: int = DEFAULT_KLINE_LI
 
 
 def level_to_period(level: str) -> str:
+    # 最小获取5分钟粒度的K线
     mapping = {
-        "1min": "1",
+        "1min": "5", 
         "5min": "5",
         "15min": "15",
         "30min": "30",
