@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter
 from core.numbers import finite_float
-from services.futu_hk_service import get_realtime_quote, normalize_stock_code
+from services.akshare_service import get_realtime_quote, normalize_stock_code
 from stores.local_json import get_watchlist_map, watchlist_add, watchlist_remove
 from utils import watchlist_quote_cache
 
