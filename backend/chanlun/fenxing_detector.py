@@ -10,11 +10,26 @@
 1. ``_process_inclusion``：按缠论规则消除K线的**包含关系**，把若干根存在包含
    的K线合并成一根，得到「合并后序列」。后续所有结构（分型、笔、线段、中枢）
    都是在**合并后序列**上计算的，而不是原始K线上。
-2. ``detect``：在合并后序列上按**严格三K线**规则找出顶分型与底分型。
+2. ``detect``：在合并后序列上按**严格三K线**规则找出顶分型与底分型，
+   并把结果回填到对应合并K线的 ``fx`` 字段。
+
+数据流::
+
+    list[KLine] ──_process_inclusion──> list[MergedKLine] ──detect──> list[Fenxing]
+          │                                    │
+          │                                    └─ 分型/笔/线段/中枢都跑在这个序列上
+          └─ 原始序列，仅用于回溯定位，不参与结构计算
+
+对象只暴露两个属性，分工明确、不要混用：
+
+- ``raw_klines``：原始K线（构造时拷贝一份，全程只读，不会被合并改写）；
+- ``merged_klines``：合并后序列，长度 ≤ 原始长度。它既是分型检测的输入，
+  也是最终要交给前端画「合并区间」的产物（含 ``included`` / ``count`` / ``dir``）。
 
 Note:
     ``Fenxing.index`` 是**合并后序列**的下标，不是原始K线的下标。
-    想定位原始K线必须用 ``date`` 字段（见 ``bi_detector._count_klines_between``）。
+    想定位原始K线请用 ``date`` 字段（见 ``bi_detector._count_klines_between``），
+    或用 ``MergedKLine.start`` / ``end`` 这对日期区间。
 """
 
 from dataclasses import dataclass
@@ -29,19 +44,27 @@ from .elements import KLine, MergedKLine, IncludedRaw
 @dataclass
 class Fenxing:
     """
-    一个顶分型或底分型（三根相邻K线构成的价格转折点）。
+    一个顶分型或底分型（三根相邻**合并K线**构成的价格转折点）。
+
+    Attributes:
+        date: 中间那根合并K线的``start``日期，即这段合并区间的起始日，
+            用于与原始K线对齐。注意它不是「中间那根原始K线」的日期。
+        type: "top"=顶分型（阶段高点），"bottom"=底分型（阶段低点）。
+        high / low: 中间那根合并K线的高低点——判定分型时就是拿它跟
+            左右两根比（见 :meth:`FenxingDetector.detect`）。
+        index: 该分型在**合并后序列**中的下标。
 
     Note:
         ``index`` 是**包含合并后序列**中的下标，**不是**原始K线的位置。
-        合并会让序列变短，因此不能用它在原始 DataFrame 里直接取行。
+        合并会让序列变短，因此不能用它在原始K线列表里直接取元素。
     """
-    # 分型中间那根K线的日期（用于与原始K线对齐）
+    # 分型中间那根合并K线的起始日期（用于与原始K线对齐）
     date: datetime
     # 分型类型："top"=顶分型，"bottom"=底分型
     type: Literal["top", "bottom"]
-    # 分型中间K线的最高价
+    # 分型中间合并K线的最高价
     high: float
-    # 分型中间K线的最低价
+    # 分型中间合并K线的最低价
     low: float
     # 该分型在**合并后序列**中的下标（易踩坑，见类文档 Note）
     index: int
@@ -51,30 +74,41 @@ class FenxingDetector:
     """
     缠论分型检测器。
 
-    构造时先做一遍包含处理：
+    典型用法（通常不需要直接调用，``bi_detector`` 内部会先跑一遍）::
 
-    - **向上合并**：新K线的高、低都不低于前一根（走势向上）时，
-      取两者的 ``max``，即保留更高的高、更高的低；
-    - **向下合并**：新K线的高、低都不高于前一根（走势向下）时，
-      取两者的 ``min``，即保留更低的高、更低的低。
+        det = FenxingDetector(klines)      # ① 构造即完成包含处理
+        fenxings = det.detect()            # ② 在合并序列上找顶底分型
+
+    第一步的**包含处理**规则（见 :meth:`_process_inclusion`）:
+
+    - **向上合并**（dir="up"）：取两根的 ``max``，保留更高的高、更高的低；
+    - **向下合并**（dir="down"）：取两根的 ``min``，保留更低的高、更低的低。
 
     这样可以在不丢失有效波动的前提下压缩噪音，保留后续笔检测真正需要的
     「摆动形态」。
+
+    Attributes:
+        raw_klines: 原始K线序列（拷贝，只读）。
+        merged_klines: 包含处理后的合并K线序列，分型跑在它上面；
+            同时它就是要交给前端画「合并区间」的最终产物。
     """
     def __init__(self, klines: list[KLine]):
         """
         Args:
-            klines: 原始K线序列（需按时间升序），元素为 :class:`KLine`。
-                构造完成后：
+            klines: 原始K线序列（需按**时间升序**），元素为 :class:`KLine`。
+                构造函数会 ``list(...)`` 拷贝一份，调用方之后再改动原列表
+                不会影响本对象。空列表是允许的（``detect()`` 会返回空）。
 
-                - ``self.raw_klines`` 仍是**原始**序列；
-                - ``self.merged_klines`` 是保留包含关系的合并K线对象（供前端画合并区间）。
+        构造完成后的两个属性，分工不同、别混用：
+
+        - ``self.raw_klines``：仍是**原始**序列，一根不多一根不少；
+        - ``self.merged_klines``：保留包含关系的合并K线（长度 ≤ 原始长度），
+          分型 / 笔跑在它上面，同时供前端画合并区间。
 
         Note:
-        TODO 修改注释？？？？？？？？
-            三个属性各有用途，别混用：分型 / 笔跑在 ``klines`` 与 ``mer`` 上
-            （二者等长、下标一一对应），而定位原始K线要用 ``mer[i].lst`` 里
-            元素的 ``idx``。
+            合并会让序列变短，所以**合并序列的下标 ≠ 原始K线下标**。
+            要反查某根合并K线覆盖了哪些原始K线，用它的 ``start`` / ``end``
+            日期区间或 ``included`` 明细，不要用下标去原始序列里取。
         """
         self.raw_klines: list[KLine] = list(klines)
         self.merged_klines: list[MergedKLine] = []
@@ -82,17 +116,34 @@ class FenxingDetector:
 
     def _process_inclusion(self):
         """
-        包含关系处理（缠论标准步骤），原地把 ``self.klines`` 换成合并后序列。
+        包含关系处理（缠论标准步骤），结果写入 ``self.merged_klines``。
 
         判定「被包含」：两根K线中，一根的最高价不高于另一根的最高价
         且最低价不低于另一根的最低价，即价格区间互相套住 → 只能保留一根。
+        两个方向都要判（谁包谁都算包含），因为后续合并方向不同。
 
-        合并方向由 ``merge_direction`` 决定：先看**已有合并序列的前两根**
-        走势，若它们不构成明确的上升 / 下降关系，再退而看**当前K线相对前一根**。
+        合并方向由内部函数 ``merge_direction`` 决定：先看**已有合并序列的
+        前两根**走势，若它们不构成明确的上升 / 下降关系，再退而看
+        **当前K线相对前一根**。
+
+        一根**合并K线**的各字段这样产出（对应 :class:`MergedKLine`）:
+
+        - ``high`` / ``low``：按 dir 取两根的 ``max``（up）或 ``min``（down）；
+        - ``close``：取区间最后一根的收盘；
+        - ``count`` / ``included``：这段区间吃进了几根原始K线、分别是哪几根
+          （``included`` 供前端画被包含的蓝色细线）；
+        - ``start`` / ``end``：区间首/末根原始K线的日期；
+        - ``dir``：本次合并的方向，前端据此画红/绿空心框。
 
         Note:
             合并后序列长度 ≤ 原始K线数量，因此所有基于分型的下标都必须
             重新编号，切勿与原始下标混用。
+
+        实现说明:
+            先并行累积若干 ``out_*`` 列表（纯标量，合并时原地改末尾元素），
+            同时用 ``groups`` 记录每根合并K线吃掉了哪些原始K线；最后一遍
+            循环才把两者装配成 ``MergedKLine``。这样既保留了包含关系，
+            又避免了在 ``KLine`` / ``MergedKLine`` 对象上来回读写字段。
         """
         src = self.raw_klines
         # 空序列直接返回：下面 out_* 都以 src[0] 初始化，空列表会越界
@@ -198,13 +249,18 @@ class FenxingDetector:
                 # 起点，继续沿用原日期，避免分型日期被无意义地往后挪。
                 out_date[-1] = k.date
 
+        # 装配阶段：把标量列表 + 分组信息合成最终的 MergedKLine 序列
         n = len(out_high)
         for i in range(n):
+            # 该合并K线吃掉的原始K线明细，供前端画真实高低范围（chan.py 的蓝色细线）。
+            # 注意：这里把区间首根也放进去了，与 count 口径一致（count=整组根数）
             include: list[IncludedRaw] = list()
             for j in range(len(groups[i])):
                 include.append(IncludedRaw(date=groups[i][j].date, high=groups[i][j].high, low=groups[i][j].low))
             self.merged_klines.append(MergedKLine(start=groups[i][0].date,
                                                   end=groups[i][-1].date,
+                                                  # 原始序列下标：groups[i][0].idx / groups[i][-1].idx
+                                                  # 目前暂不回填（恒 -1），定位请用上面的 start/end 日期
                                                   start_idx=-1,
                                                   end_idx=-1,
                                                   high=out_high[i],
@@ -218,25 +274,35 @@ class FenxingDetector:
         """
         在**合并后序列**上检测严格三K线分型。
 
-        判定规则：
+        判定规则（中间那根 vs 左右两根，两对高低点都要比）:
 
         - **顶分型**：中间K线的 high 与 low **同时**大于左右两根；
         - **底分型**：中间K线的 high 与 low **同时**小于左右两根。
 
+        除了返回分型列表，本方法还会**就地**把 ``merged_klines[i].fx``
+        置为 "top" / "bottom"，这样前端画合并K线时能直接标出分型位置，
+        不必再拿分型列表去反查。
+
         Returns:
             按 ``index`` 升序排列的分型列表（顶、底混合）。
+            合并序列不足 3 根时返回空列表（三K线窗口都凑不齐）。
 
         Note:
-            返回的 ``Fenxing.index`` 是**合并后序列**的下标，不是原始K线下标。
-            合并会让序列变短，用它去原始 DataFrame 取行会错位。
+            - 返回的 ``Fenxing.index`` 是**合并后序列**的下标，不是原始K线下标。
+              合并会让序列变短，用它去原始K线列表取元素会错位。
+            - 本方法有**副作用**（写 ``fx`` 字段）。正常流程只调用一次
+              （``BiDetector.detect`` 里），重复调用会覆盖上一次的 fx，
+              但不会重复追加分型（每次都新建列表）。
         """
         kl = self.merged_klines
         n = len(kl)
         if n < 3:
             return []
 
+        # 转 ndarray 是为了用错位切片做向量化比较，避免 n-2 次 Python 循环
         highs = np.array([k.high for k in kl], dtype=float)
         lows = np.array([k.low for k in kl], dtype=float)
+        # 分型日期取合并K线的 start（区间首根原始K线的日期）
         dates = [k.start for k in kl]
         fenxings: list[Fenxing] = []
 
@@ -272,7 +338,7 @@ class FenxingDetector:
         for i in np.flatnonzero(top_mask):
             # +1 补回错位切片的偏移：mask 第 i 项 → 合并序列第 i+1 根
             idx = int(i) + 1
-            # 回填分型：self.mer 与 self.klines 等长，可直接用同一 idx
+            # 回填分型：回填到合并序列的第 idx 根（与 Fenxing.index 同一口径）
             self.merged_klines[idx].fx = "top"
             fenxings.append(
                 Fenxing(
