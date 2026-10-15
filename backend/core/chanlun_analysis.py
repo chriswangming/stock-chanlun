@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 from fastapi import HTTPException
-
-from chanlun.elements import ChanlunAnalysis
+from chanlun.elements import ChanlunAnalysis, KLine
 from chanlun.engine import ChanlunEngine
 from core.kline_serialize import analysis_klines_to_df
 from services.akshare_service import get_kline_hist  # used by run_analysis
@@ -34,6 +33,8 @@ def level_to_period(level: str) -> str:
     return mapping.get(level, "daily")
 
 
+
+
 def run_analysis(code: str, level: str, kline_limit: int = DEFAULT_KLINE_LIMIT) -> ChanlunAnalysis:
     cache_key = chanlun_cache_key(code, level, kline_limit)
     cached = chanlun_cache.get(cache_key)
@@ -52,7 +53,10 @@ def run_analysis(code: str, level: str, kline_limit: int = DEFAULT_KLINE_LIMIT) 
     if len(df) > kline_limit:
         df = df.tail(kline_limit).reset_index(drop=True)
 
-    engine = ChanlunEngine(df)
+    # 行情 DataFrame -> KLine 列表：列名归一/日期转换/脏数据剔除都在这里完成，
+    # 之后引擎只认 KLine，不再接触 DataFrame
+    klines: list[KLine] = KLine.from_dataframe(df)
+    engine = ChanlunEngine(klines)
     result = engine.analyze(level=level)
     result.stock_code = code
 

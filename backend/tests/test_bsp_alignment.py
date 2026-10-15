@@ -24,6 +24,7 @@ import pandas as pd
 
 from chanlun.bi_detector import BiDetector
 from chanlun.config import BSPConfig, BSPointConfig
+from chanlun.elements import KLine
 from chanlun.macd import MACDSeries
 from chanlun.segment_detector import SegmentDetector
 from chanlun.signals import BSPointList
@@ -52,10 +53,9 @@ class BSPAlignmentTests(unittest.TestCase):
             cls.data = json.load(f)
 
     def _run(self, rows, conf: dict):
-        df = _df_from_rows(rows)
-        bi_detector = BiDetector(df)
+        bi_detector = BiDetector(KLine.from_dataframe(_df_from_rows(rows)))
         bis = bi_detector.detect()
-        macd = MACDSeries.from_bars(bi_detector.raw_bars)
+        macd = MACDSeries.from_klines(bi_detector.raw_bars)
         seg_detector = SegmentDetector(bis, macd_series=macd)
         seg_detector.detect_segments()
         seg_detector.detect_zhongshus()

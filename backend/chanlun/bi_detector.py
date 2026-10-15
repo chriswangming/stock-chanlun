@@ -10,26 +10,15 @@
 
 from __future__ import annotations
 
-# [冗余-已注释] 随 A1(_as_datetime) 一起失去用途：本模块已无 datetime 引用
-# from datetime import datetime
 from typing import Optional
-
-import pandas as pd
 
 from .base import (
     DOWN, TOP, UP, BOTTOM,
-    CBi, MergedKLine, RawBar, end_is_peak,
+    CBi, MergedKLine, end_is_peak,
 )
 from .config import BiConfig, ChanlunConfig
-from .elements import Bi
+from .elements import Bi, KLine
 from .fenxing_detector import Fenxing, FenxingDetector
-
-
-# [冗余-已注释] 与 fenxing_detector._as_datetime 逐字重复，本模块从未调用
-# def _as_datetime(d) -> datetime:
-#     if hasattr(d, "to_pydatetime"):
-#         return d.to_pydatetime()
-#     return d
 
 
 class BiDetector:
@@ -43,8 +32,9 @@ class BiDetector:
 
     virtual_bi: bool = True   # 是否在尾部补一笔未确认的虚笔（chan.py 默认行为）
 
-    def __init__(self, klines: pd.DataFrame, config: Optional[ChanlunConfig] = None):
-        self.klines = klines.reset_index(drop=True)
+    def __init__(self, klines: list[KLine], config: Optional[ChanlunConfig] = None):
+        """klines: KLine 序列（DataFrame 请先用 KLine.from_dataframe 转换）。"""
+        self.klines = klines
         self.config = (config or ChanlunConfig()).bi
         self._virtual_enabled_off = not self.virtual_bi
         self._fenxing_detector = FenxingDetector(self.klines)
@@ -59,21 +49,10 @@ class BiDetector:
         """包含处理后的合并K线序列。"""
         return self._merged
 
-    # [冗余-已注释] D1: 生产代码无引用，仅 test_engine 用到
-    # @property
-    # def processed_klines(self) -> pd.DataFrame:
-    #     return self._fenxing_detector.klines
-
-    # [冗余-已注释] A2: 零引用（线段模块改用 SegmentDetector.lines 拿内部笔序列）
-    # @property
-    # def bis_internal(self) -> list[CBi]:
-    #     """内部笔对象（供线段/中枢模块消费，带 pre/next 与所属括线信息）。"""
-    #     return self._bis
-
     @property
-    def raw_bars(self) -> list[RawBar]:
-        """清洗后的原始K线（下标即 RawBar.idx，MACD 序列按此顺序对齐）。"""
-        return self._fenxing_detector.raws
+    def raw_bars(self) -> list[KLine]:
+        """清洗后的原始K线（下标即 KLine.idx，MACD 序列按此顺序对齐）。"""
+        return self._fenxing_detector.klines
 
     # ── 主流程 ──────────────────────────────────────────────
     def detect(self) -> list[Bi]:

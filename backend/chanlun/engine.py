@@ -1,14 +1,12 @@
 """
 缠论分析引擎 — 整合所有组件
 """
-import pandas as pd
-from datetime import datetime
-
 from .config import ChanlunConfig
 from .elements import (
-    KLine, Bi, XianSegment, Zhongshu, BuySellPoint,
+    KLine, Zhongshu, BuySellPoint,
     ChanlunAnalysis, MergedKLineInfo, IncludedRaw
 )
+from .base import reindex_klines
 from .bi_detector import BiDetector
 from .macd import MACDSeries
 from .segment_detector import SegmentDetector
@@ -19,39 +17,28 @@ class ChanlunEngine:
     """
     缠论分析引擎
     用法:
-        engine = ChanlunEngine(klines_df)
+        engine = ChanlunEngine(klines)          # klines: list[KLine]
         result = engine.analyze(level="daily")
     """
 
-    def __init__(self, klines: pd.DataFrame, config: ChanlunConfig | None = None):
+    def __init__(self, klines: list[KLine], config: ChanlunConfig | None = None):
         """
-        klines: DataFrame, columns=[date, open, high, low, close, volume]
+        klines: list[KLine]（DataFrame 只允许活在最外层：run_analysis 里
+                用 KLine.from_dataframe 转一次，引擎开始不再接触 DataFrame）
         config: 缠论计算参数（笔/线段/中枢），默认对齐 chan.py
         """
-        self.raw_klines = klines.copy()
+        # 统一按下标写 idx：MACD 序列 / 笔端点下标 / 合并K线区间都按它对齐
+        self.klines: list[KLine] = reindex_klines(list(klines))
         self.config = config or ChanlunConfig()
-        self._ensure_columns()
-
-    def _ensure_columns(self):
-        col_map = {
-            '日期': 'date', '开盘': 'open', '收盘': 'close',
-            '最高': 'high', '最低': 'low', '成交量': 'volume',
-            '时间': 'date'
-        }
-        self.raw_klines.rename(columns=col_map, inplace=True)
-        if 'date' in self.raw_klines.columns:
-            self.raw_klines['date'] = pd.to_datetime(self.raw_klines['date'])
-        self.raw_klines.sort_values('date', inplace=True)
-        self.raw_klines.reset_index(drop=True, inplace=True)
 
     def analyze(self, level: str = "daily") -> ChanlunAnalysis:
         """执行完整缠论分析"""
         # 1. 包含处理 + 分型（在 BiDetector 内部完成）
-        bi_detector = BiDetector(self.raw_klines, config=self.config)
+        bi_detector = BiDetector(self.klines, config=self.config)
         bis = bi_detector.detect()
 
         # 2. 力度序列（MACD）—— 买卖点的背驰判定要用，必须在建笔序列前算好
-        macd_series = MACDSeries.from_bars(bi_detector.raw_bars)
+        macd_series = MACDSeries.from_klines(bi_detector.klines)
 
         # 3. 线段（特征序列法）与中枢（段内中枢，基于笔的重叠）
         seg_detector = SegmentDetector(bis, config=self.config, macd_series=macd_series)
@@ -67,52 +54,32 @@ class ChanlunEngine:
             macd_series=macd_series,
         )
         signals = sig_detector.detect_all()
-        trend = sig_detector.detect_trend()
+        # trend = sig_detector.detect_trend()
 
-        # 5. K 线对象：API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
-        kline_objects = self._to_klines()
-
-        # 6. 支撑阻力位
-        klines_dict = [{"date": k.date, "high": k.high, "low": k.low} for k in kline_objects]
+        # 5. 支撑阻力位
+        klines_dict = [{"date": k.date, "high": k.high, "low": k.low} for k in self.klines]
         support_resistance = sig_detector.detect_support_resistance(klines_dict, signals)
 
-        # 7. 自然语言总结
-        summary = self._make_summary(trend, signals, zhongshus)
+        # 6. 自然语言总结
+        # summary = self._make_summary(trend, signals, zhongshus)
 
         return ChanlunAnalysis(
             stock_code="",
             level=level,
-            klines=kline_objects,
+            klines=self.klines,
             merged_klines=self._to_merged_klines(bi_detector.merged_klines),
             bis=bis,
             xians=segments,
             zhongshus=zhongshus,
             signals=signals,
-            trend=trend,
-            summary=summary,
+            trend='未知',
+            summary='summary',
+            # trend=trend,
+            # summary=summary,
             support_resistance=support_resistance
         )
 
-    def _to_klines(self, df: pd.DataFrame | None = None) -> list[KLine]:
-        """默认返回原始 K 线窗口；传入 df 时可序列化任意 DataFrame。"""
-        source = df if df is not None else self.raw_klines
-        rows: list[KLine] = []
-        for row in source.itertuples(index=False):
-            d = row.date
-            if hasattr(d, "to_pydatetime"):
-                d = d.to_pydatetime()
-            rows.append(
-                KLine(
-                    date=d,
-                    open=float(row.open),
-                    high=float(row.high),
-                    low=float(row.low),
-                    close=float(row.close),
-                    volume=float(getattr(row, "volume", 0) or 0),
-                    amount=float(getattr(row, "amount", 0) or 0),
-                )
-            )
-        return rows
+
 
     @staticmethod
     def _to_merged_klines(merged) -> list[MergedKLineInfo]:

@@ -11,7 +11,7 @@ if ROOT_DIR not in sys.path:
 import pandas as pd
 
 from chanlun.config import BSPConfig, BSPointConfig, ChanlunConfig
-from chanlun.elements import Bi, BuySellPoint
+from chanlun.elements import Bi, BuySellPoint, KLine
 from chanlun.engine import ChanlunEngine
 from chanlun.signals import SignalDetector, _main_name
 
@@ -56,7 +56,7 @@ class SignalDetectorTests(unittest.TestCase):
         cfg = ChanlunConfig()
         cfg.bsp = BSPConfig(buy=BSPointConfig(**bsp_conf),
                             sell=BSPointConfig(**bsp_conf))
-        return ChanlunEngine(_fixture_df(), config=cfg).analyze(level="daily")
+        return ChanlunEngine(KLine.from_dataframe(_fixture_df()), config=cfg).analyze(level="daily")
 
     def test_signals_follow_chan_py_on_fixture(self):
         """chan.py 在同样数据 + min_zs_cnt=0 下给出 6 个买卖点，主类型序列须一致。"""

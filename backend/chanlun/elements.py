@@ -4,7 +4,11 @@ from typing import Literal, Optional
 
 
 class KLine(BaseModel):
-    """单根K线数据"""
+    """单根K线数据。
+
+    既是 API 的对外 DTO，也是算法层唯一的K线载体（原先算法层另有一个 RawBar，
+    两者字段几乎完全重合，已合并，见 base.reindex_klines）。
+    """
     date: datetime
     open: float
     high: float
@@ -12,6 +16,48 @@ class KLine(BaseModel):
     close: float
     volume: float
     amount: Optional[float] = 0.0  # 成交额
+    # 清洗后序列中的下标。MACD 序列、笔端点下标、合并K线区间都按它对齐，
+    # 由 base.reindex_klines / from_dataframe 统一写入；纯算法内部用，不进 API。
+    idx: int = Field(default=-1, exclude=True)
+
+    @staticmethod
+    def from_dataframe(df) -> list["KLine"]:
+        """外部 DataFrame -> KLine 列表（对外数据与内部算法之间唯一的转换入口）。
+
+        归一化在这里一次做完：中文列名映射 -> 日期转 datetime -> 按时间升序 ->
+        丢掉 NaN/inf 脏数据（会污染包含关系判定）-> 修正高低价颠倒 -> 按下标写 idx。
+        """
+        import pandas as pd  # 局部导入：elements 保持对 pandas 的可选依赖
+
+        col_map = {
+            '日期': 'date', '开盘': 'open', '收盘': 'close',
+            '最高': 'high', '最低': 'low', '成交量': 'volume',
+            '成交额': 'amount', '时间': 'date',
+        }
+        df = df.rename(columns=col_map)
+        if 'date' in df.columns:
+            df = df.assign(date=pd.to_datetime(df['date'])).sort_values('date')
+        df = df.reset_index(drop=True)
+
+        out: list[KLine] = []
+        for row in df.itertuples(index=False):
+            o, h, l, c = (float(getattr(row, f)) for f in ("open", "high", "low", "close"))
+            if any(v != v or v in (float("inf"), float("-inf")) for v in (o, h, l, c)):
+                continue
+            if h < l:  # 个别数据源高低价颠倒
+                h, l = l, h
+            d = getattr(row, "date")
+            if hasattr(d, "to_pydatetime"):
+                d = d.to_pydatetime()
+            out.append(
+                KLine(
+                    date=d, open=o, high=h, low=l, close=c,
+                    volume=float(getattr(row, "volume", 0) or 0),
+                    amount=float(getattr(row, "amount", 0) or 0),
+                    idx=len(out),   # 脏行已跳过，这里必须是输出序号才连续
+                )
+            )
+        return out
 
 
 class IncludedRaw(BaseModel):

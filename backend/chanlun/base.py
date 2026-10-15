@@ -26,7 +26,7 @@ from datetime import datetime
 from typing import Optional, Union
 
 from .config import SegConfig, ZSConfig
-from .elements import Bi
+from .elements import Bi, KLine
 
 # ── 方向常量 ────────────────────────────────────────────────
 UP = "up"
@@ -44,23 +44,17 @@ def has_overlap(l1: float, h1: float, l2: float, h2: float, equal: bool = False)
 
 
 # ── 原始 K 线 ───────────────────────────────────────────────
-class RawBar:
-    """未做包含处理的单根 K 线（对应 chan.py 的 CKLine_Unit）。"""
+def reindex_klines(klines: list[KLine]) -> list[KLine]:
+    """给K线序列按下标写 idx（就地修改并返回同一批对象）。
 
-    __slots__ = ("idx", "date", "open", "high", "low", "close", "volume")
-
-    def __init__(self, idx: int, date: datetime, open_: float, high: float,
-                 low: float, close: float, volume: float = 0.0):
-        self.idx = idx
-        self.date = date
-        self.open = open_
-        self.high = high
-        self.low = low
-        self.close = close
-        self.volume = volume
-
-    def __repr__(self):  # pragma: no cover - 调试用
-        return f"RawBar({self.idx},{self.date},{self.low}~{self.high})"
+    原先 KLine（DTO）要先转成 RawBar（算法内部）才能进算法，两者字段几乎完全
+    重合（RawBar 只多一个 idx），已合并成一个 KLine；这里就是合并后唯一多出来的
+    一步：把下标写进去。MACD 序列、笔端点下标、合并K线区间都按它对齐，
+    因此必须在包含处理之前、且顺序固定。
+    """
+    for i, k in enumerate(klines):
+        k.idx = i
+    return klines
 
 
 # ── 通用包含合并器 ──────────────────────────────────────────
@@ -180,7 +174,7 @@ class _Combiner:
 class MergedKLine(_Combiner):
     """做过包含关系处理的 K 线（对应 chan.py 的 CKLine）。"""
 
-    def __init__(self, raw: RawBar, idx: int, _dir: str = UP):
+    def __init__(self, raw: KLine, idx: int, _dir: str = UP):
         super().__init__(raw, _dir)
         self.idx = idx
         # 本K线刚创建时的高低点。chan.py 是流式的：当它是「最新一根」时判定的
@@ -190,10 +184,10 @@ class MergedKLine(_Combiner):
         self.init_low = raw.low
 
     # _Combiner 钩子：元素是原始K线
-    def _item_high(self, x: RawBar) -> float:
+    def _item_high(self, x: KLine) -> float:
         return x.high
 
-    def _item_low(self, x: RawBar) -> float:
+    def _item_low(self, x: KLine) -> float:
         return x.low
 
     @property
@@ -324,10 +318,10 @@ class CBi:
     def get_end_val(self) -> float:
         return self.end_klc.high if self.is_up() else self.end_klc.low
 
-    def get_begin_klu(self) -> RawBar:
+    def get_begin_klu(self) -> KLine:
         return self.begin_klc.get_peak(is_high=self.is_down())
 
-    def get_end_klu(self) -> RawBar:
+    def get_end_klu(self) -> KLine:
         return self.end_klc.get_peak(is_high=self.is_up())
 
     def _high(self) -> float:

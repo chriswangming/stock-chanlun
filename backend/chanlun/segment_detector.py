@@ -54,11 +54,6 @@ class SegmentDetector:
     def seg_list(self) -> Optional[SegListComm]:
         return self._seg_list
 
-    # [冗余-已注释] A4: 零引用（engine 只用 lines / seg_list）
-    # @property
-    # def zs_list(self) -> Optional[CZSList]:
-    #     return self._zs_list
-
     # ── 线段 ─────────────────────────────────────
     def detect_segments(self, algo: Optional[str] = None, **_deprecated) -> list[XianSegment]:
         """
@@ -143,13 +138,3 @@ class SegmentDetector:
                 )
             )
         return out
-
-    # ── 其它 ─────────────────────────────────────
-    # [冗余-已注释] D2: 生产代码无引用，仅 test_segment_detector 用到
-    # @staticmethod
-    # def get_zhongshu_for_price(zhongshus: list[Zhongshu], price: float):
-    #     """找到价格所在的中枢（取最近的一个）。"""
-    #     for zs in reversed(zhongshus):
-    #         if zs.range_low <= price <= zs.range_high:
-    #             return zs
-    #     return None

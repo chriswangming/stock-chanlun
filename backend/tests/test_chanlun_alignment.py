@@ -20,6 +20,7 @@ if ROOT_DIR not in sys.path:
 
 import pandas as pd
 
+from chanlun.elements import KLine
 from chanlun.engine import ChanlunEngine
 from chanlun.bi_detector import BiDetector
 from chanlun.fenxing_detector import FenxingDetector
@@ -56,10 +57,11 @@ class ChanPyAlignmentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.df, cls.expected = _load_fixture()
-        cls.fx = FenxingDetector(cls.df)
-        cls.bd = BiDetector(cls.df)
+        cls.klines = KLine.from_dataframe(cls.df)
+        cls.fx = FenxingDetector(cls.klines)
+        cls.bd = BiDetector(cls.klines)
         cls.bis = cls.bd.detect()
-        cls.result = ChanlunEngine(cls.df).analyze(level="daily")
+        cls.result = ChanlunEngine(cls.klines).analyze(level="daily")
 
     # ── 1. 包含处理后的合并K线 ───────────────────────────────
     def test_merged_klines_match_chan_py(self):

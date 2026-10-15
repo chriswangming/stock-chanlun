@@ -43,7 +43,7 @@ class MACDSeries:
 
     # ── 构造 ────────────────────────────────────────────
     @classmethod
-    def from_bars(cls, bars: Iterable, fast: int = 12, slow: int = 26,
+    def from_klines(cls, bars: Iterable, fast: int = 12, slow: int = 26,
                   signal: int = 9, rsi_period: int = 14) -> "MACDSeries":
         """
         bars: 具备 .close / .volume 的原始K线（chan.py CKLine_Unit）。

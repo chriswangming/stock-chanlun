@@ -4,12 +4,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal, Optional
 
-import pandas as pd
-
 from .base import (
     BOTTOM, COMBINE, DOWN, TOP, UP,
-    MergedKLine, RawBar,
+    MergedKLine, reindex_klines,
 )
+from .elements import KLine
 
 
 @dataclass
@@ -38,44 +37,18 @@ class FenxingDetector:
        这样笔的端点才会落在真实的转折点而不是被包含吞掉的最后一根。
     """
 
-    def __init__(self, klines: pd.DataFrame):
-        df = klines.reset_index(drop=True)
-        self.raw_klines = df
-        self.raws: list[RawBar] = []
+    def __init__(self, klines: list[KLine]):
+        self.klines: list[KLine] = klines
         self.merged: list[MergedKLine] = []
-        self._build(df)
+        self._merge()
 
     # ── 包含处理 ────────────────────────────────────────────
-    def _build(self, df: pd.DataFrame):
-        if df.empty:
+    def _merge(self):
+        if not self.klines:
             return
 
-        dates = df["date"].tolist()
-        highs = df["high"].tolist()
-        lows = df["low"].tolist()
-        opens = df["open"].tolist()
-        closes = df["close"].tolist()
-        vols = df["volume"].tolist() if "volume" in df.columns else [0.0] * len(df)
-
-        self.raws = []
-        for i in range(len(df)):
-            o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-            # 丢掉缺失/非有限的脏数据：NaN 会污染包含关系判定（max/min 传播后整段失效）
-            if any(v is None or v != v or v in (float("inf"), float("-inf"))
-                   for v in (o, h, l, c)):
-                continue
-            o, h, l, c = float(o), float(h), float(l), float(c)
-            if h < l:  # 个别数据源高低价颠倒
-                h, l = l, h
-            self.raws.append(
-                RawBar(len(self.raws), self._as_datetime(dates[i]), o, h, l, c,
-                       float(vols[i] or 0.0))
-            )
-        if not self.raws:
-            return
-
-        self.merged = [MergedKLine(self.raws[0], idx=0, _dir=UP)]
-        for raw in self.raws[1:]:
+        self.merged = [MergedKLine(self.klines[0], idx=0, _dir=UP)]
+        for raw in self.klines[1:]:
             # try_add 返回 UP/DOWN 表示无需合并、需要新建一根合并K线，
             # 新K线的合并方向由这个返回值决定（chan.py add_single_klu）
             direction = self.merged[-1].try_add(raw)
@@ -111,26 +84,3 @@ class FenxingDetector:
                 )
             )
         return out
-
-    @property
-    def klines(self) -> pd.DataFrame:
-        """处理包含关系后的 K 线 DataFrame（对外兼容旧接口）。"""
-        return pd.DataFrame(
-            [
-                {
-                    "date": m.time_begin,
-                    "open": m.lst[0].open,
-                    "high": m.high,
-                    "low": m.low,
-                    "close": m.lst[-1].close,
-                    "volume": sum(float(r.volume or 0.0) for r in m.lst),
-                }
-                for m in self.merged
-            ]
-        )
-
-    @staticmethod
-    def _as_datetime(d) -> datetime:
-        if hasattr(d, "to_pydatetime"):
-            return d.to_pydatetime()
-        return d
