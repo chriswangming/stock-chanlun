@@ -75,10 +75,10 @@
                 v-bind="stockLinkPrefetchHandlers(stock.code)"
               >
                 <span class="mono">{{ stock.code }}</span>
-                <span class="name">{{ stock.name }}</span>
-                <span class="mono">{{ stock.price?.toFixed(2) || '—' }}</span>
+                <span class="name">{{ stock.name || stock.code }}</span>
+                <span class="mono">{{ stock.quote_ok === false ? '—' : (stock.price?.toFixed(2) || '—') }}</span>
                 <span class="mono" :class="stock.change_pct > 0 ? 'price-up' : 'price-down'">
-                  {{ stock.change_pct > 0 ? '+' : '' }}{{ stock.change_pct?.toFixed(2) || 0 }}%
+                  {{ stock.quote_ok === false ? '—' : (stock.change_pct > 0 ? '+' : '') + (stock.change_pct?.toFixed(2) || 0) + '%' }}
                 </span>
                 <span class="added-time">{{ formatAddedTime(stock.added_at) }}</span>
                 <button class="remove-btn" @click.stop="removeStock(stock.code)">
@@ -99,10 +99,10 @@
             v-bind="stockLinkPrefetchHandlers(stock.code)"
           >
             <span class="mono">{{ stock.code }}</span>
-            <span class="name">{{ stock.name }}</span>
-            <span class="mono">{{ stock.price?.toFixed(2) || '—' }}</span>
+            <span class="name">{{ stock.name || stock.code }}</span>
+            <span class="mono">{{ stock.quote_ok === false ? '—' : (stock.price?.toFixed(2) || '—') }}</span>
             <span class="mono" :class="stock.change_pct > 0 ? 'price-up' : 'price-down'">
-              {{ stock.change_pct > 0 ? '+' : '' }}{{ stock.change_pct?.toFixed(2) || 0 }}%
+              {{ stock.quote_ok === false ? '—' : (stock.change_pct > 0 ? '+' : '') + (stock.change_pct?.toFixed(2) || 0) + '%' }}
             </span>
             <span class="added-time">{{ formatAddedTime(stock.added_at) }}</span>
             <button class="remove-btn" @click.stop="removeStock(stock.code)">
@@ -188,9 +188,11 @@ function goToStock(code: string) { router.push(`/stock/${code}`) }
 
 async function addStock() {
   if (!addCode.value.trim()) return
-  const code = addCode.value.trim().replace(/\D/g, '').padStart(6, '0')
-  if (code.length !== 6) {
-    toast.warning('请输入有效的6位股票代码')
+  // 港股是 5 位代码，这里不要自己补零到 6 位——后端 normalize 会统一成 5 位。
+  // 前端补成 '000700' 会让富途认不出这只股票。
+  const code = addCode.value.trim().replace(/\D/g, '')
+  if (code.length < 4 || code.length > 6) {
+    toast.warning('请输入有效的股票代码（4-6 位数字）')
     return
   }
   try {

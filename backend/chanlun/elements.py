@@ -16,6 +16,7 @@ Note:
     segment_detector / signals 完成，由 engine 统一编排。
 """
 
+from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Literal, Optional
@@ -44,6 +45,78 @@ class KLine(BaseModel):
     # 成交量（单位取决于数据源口径：股 / 手）
     volume: float
     amount: Optional[float] = 0.0  # 成交额
+    # 该K线在**原始（清洗后）序列**中的下标。
+    # 算法内部使用：合并K线的 start_idx / end_idx 要靠它定位到原始K线。
+    # exclude=True —— 不进 API 响应，前端拿到的数据结构保持不变。
+    idx: int = Field(default=-1, exclude=True)
+
+class IncludedRaw(BaseModel):
+    """被合并进合并K线的原始K线（chan.py 里画成蓝色的那部分）。"""
+    date: datetime
+    high: float
+    low: float
+
+# @dataclass
+# class MergedKLine:
+#     """
+#     包含处理后的**合并K线**（算法内部对象，对应 chan.py 的 ``CKLine``）。
+
+#     与 :class:`MergedKLineInfo` 的区别：本对象是计算期用的活对象，持有原始
+#     KLine 引用；``MergedKLineInfo`` 是序列化给前端的扁平 DTO，由
+#     ``engine._to_merged_klines`` 负责两者之间的转换。
+
+#     Attributes:
+#         lst: 被合并进来的原始K线（按时间升序，至少 1 根）。保留它是关键 ——
+#             老实现只留区间高低点，把「谁被谁包住了」这个信息丢掉了，
+#             前端就无法画出 chan.py 那种蓝色被包含K线。
+#         high / low: 合并后的区间高低点。注意**不是** ``lst`` 里的最高/最低，
+#             而是按合并方向「削掉」被包住部分之后的结果。
+#         dir: 合并方向，决定 high/low 取 max 还是 min。
+#         fx: 该合并K线的分型（``detect()`` 阶段回填，初始为 None）。
+#         date: 合并K线的「代表日期」。沿用老实现的规则：只有「前一根包住当前根」
+#             时才把日期推进到当前根，否则沿用前一根日期；分型与笔的端点日期取它。
+#         open / close: 区间首根的开盘、区间末根的收盘。
+#         volume: 区间内所有原始K线的成交量之和。
+#     """
+#     lst: list = field(default_factory=list)
+#     high: float = 0.0
+#     low: float = 0.0
+#     dir: Literal["up", "down"] = "up"
+#     fx: Optional[Literal["top", "bottom"]] = None
+#     date: Optional[datetime] = None
+#     open: float = 0.0
+#     close: float = 0.0
+#     volume: float = 0.0
+
+#     @property
+#     def start_idx(self) -> int:
+#         """首根原始K线在原始序列中的下标（空区间时为 -1）。"""
+#         return self.lst[0].idx if self.lst else -1
+
+#     @property
+#     def end_idx(self) -> int:
+#         """末根原始K线在原始序列中的下标（空区间时为 -1）。"""
+#         return self.lst[-1].idx if self.lst else -1
+
+
+class MergedKLine(BaseModel):
+    """包含处理后的合并K线（chan.py 的 CKLine），供前端在主图上画出合并区间。
+
+    start/end 是该合并K线覆盖的原始K线首/尾日期；count 为被合并进来的原始K线根数。
+    画法参考 chan.py 出图：dir=up 红空心框 / dir=down 绿空心框，
+    included 里的被包含K线用蓝色细线画真实高低范围。
+    """
+    start: datetime
+    end: datetime
+    start_idx: int = -1          # 首根原始K线在（清洗后）序列里的下标
+    end_idx: int = -1            # 末根原始K线下标
+    high: float                  # 合并后的区间高点
+    low: float                   # 合并后的区间低点
+    dir: Literal["up", "down"] = "up"   # 合并方向（决定高低点如何取）
+    count: int = 1               # 包含多少根原始K线
+    fx: Optional[Literal["top", "bottom"]] = None  # 该合并K线的分型
+    # 被包含进来的原始K线（不含首根）：count>1 时非空，前端画蓝色高低线
+    included: list[IncludedRaw] = []
 
 
 class Bi(BaseModel):
@@ -234,6 +307,8 @@ class ChanlunAnalysis(BaseModel):
     summary: str  # 自然语言总结
     # 支撑阻力位（按强度降序）
     support_resistance: list[SupportResistanceLevel] = []
+    # 包含处理后的合并K线（与 klines 同源、等长或更短），用于前端画合并区间
+    merged_klines: list[MergedKLine] = []
 
 
 class StockInfo(BaseModel):

@@ -19,7 +19,7 @@ Note:
 import pandas as pd
 from datetime import datetime
 from .elements import (
-    KLine, Bi, XianSegment, Zhongshu, BuySellPoint,
+    KLine, MergedKLine, IncludedRaw, Bi, XianSegment, Zhongshu, BuySellPoint,
     ChanlunAnalysis
 )
 from .bi_detector import BiDetector
@@ -93,8 +93,12 @@ class ChanlunEngine:
 
             其中 5b 必须在 6 之后 —— 它要用到第 6 步产出的 ``kline_objects``。
         """
+        # 1. 先把原始K线统一成 KLine 对象：笔检测与最终对外返回共用同一份，
+        #    避免两次转换产生口径差异
+        kline_objects = self._to_klines()
+
         # 笔检测器内部已完成分型识别与包含处理，无需单独跑一遍分型
-        bi_detector = BiDetector(self.raw_klines)
+        bi_detector = BiDetector(kline_objects)
         bis = bi_detector.detect(min_bars=5)
 
         # 3. 线段识别
@@ -109,8 +113,8 @@ class ChanlunEngine:
         signals = sig_detector.detect_all()
         trend = sig_detector.detect_trend()
 
-        # 6. K 线对象：API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
-        kline_objects = self._to_klines()
+        # 6. K 线对象已在第 1 步生成（kline_objects），此处无需重复转换。
+        #    API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
 
         # 5b. 支撑阻力位：需要第 6 步产出的 kline_objects，故排在其后
         klines_dict = [{"date": k.date, "high": k.high, "low": k.low} for k in kline_objects]
@@ -123,6 +127,7 @@ class ChanlunEngine:
             stock_code="",
             level=level,
             klines=kline_objects,
+            merged_klines=bi_detector._fenxing_detector.merged_klines,
             bis=bis,
             xians=segments,
             zhongshus=zhongshus,
@@ -152,7 +157,7 @@ class ChanlunEngine:
         """
         source = df if df is not None else self.raw_klines
         rows: list[KLine] = []
-        for row in source.itertuples(index=False):
+        for idx, row in enumerate(source.itertuples(index=False)):
             d = row.date
             # pandas Timestamp → python datetime，保证 pydantic 直接校验通过
             if hasattr(d, "to_pydatetime"):
@@ -164,6 +169,8 @@ class ChanlunEngine:
                     high=float(row.high),
                     low=float(row.low),
                     close=float(row.close),
+                    # 原始序列下标：合并K线的 start_idx/end_idx 靠它回溯定位
+                    idx=idx,
                     # 用 getattr 兜底：数据源可能缺 volume / amount 列
                     volume=float(getattr(row, "volume", 0) or 0),
                     amount=float(getattr(row, "amount", 0) or 0),
@@ -171,6 +178,39 @@ class ChanlunEngine:
             )
         return rows
 
+    # @staticmethod
+    # def _to_merged_klines(merged) -> list[MergedKLineInfo]:
+    #     """把包含处理后的合并K线转成可序列化的结构。
+
+    #     注意 high/low 用合并后的区间值（MergedKLine.high/low），而不是区间内
+    #     原始K线的最高/最低 —— 包含处理的核心就是按合并方向「削掉」被包住的部分。
+    #     """
+    #     out: list[MergedKLineInfo] = []
+    #     for m in merged:
+    #         if not len(m.lst):
+    #             continue
+    #         first, last = m.lst[0], m.lst[-1]
+    #         # 被包含进来的原始K线（lst[1:]）：前端用蓝色细线画它们的真实高低范围
+    #         included = [
+    #             IncludedRaw(date=r.date, high=float(r.high), low=float(r.low))
+    #             for r in m.lst[1:]
+    #         ]
+    #         out.append(
+    #             MergedKLineInfo(
+    #                 start=first.date,
+    #                 end=last.date,
+    #                 start_idx=int(first.idx),
+    #                 end_idx=int(last.idx),
+    #                 high=float(m.high),
+    #                 low=float(m.low),
+    #                 dir=m.dir,
+    #                 count=len(m.lst),
+    #                 fx=m.fx,
+    #                 included=included,
+    #             )
+    #         )
+    #     return out
+    
     def _make_summary(self, trend: str, signals: list[BuySellPoint],
                       zhongshus: list[Zhongshu]) -> str:
         """

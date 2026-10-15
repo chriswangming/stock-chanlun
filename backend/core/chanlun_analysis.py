@@ -58,7 +58,7 @@ def level_to_period(level: str) -> str:
     宁可返回日线也不要向数据源传非法参数。
     """
     mapping = {
-        "1min": "1",
+        "1min": "5",
         "5min": "5",
         "15min": "15",
         "30min": "30",

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 from datetime import datetime
-from .elements import Bi
+from .elements import Bi, KLine, MergedKLine
 from .fenxing_detector import FenxingDetector, Fenxing
 
 
@@ -33,33 +33,37 @@ class BiDetector:
     3. 同级别笔由连续顶底分型构成
     """
 
-    def __init__(self, klines: pd.DataFrame):
+    def __init__(self, klines: list[KLine]):
         """
         Args:
-            klines: 原始K线 DataFrame（需含 date/open/high/low/close）。
+            klines: 原始K线序列（需按时间升序），元素为 :class:`KLine`。
+                空列表是允许的，此时 ``detect()`` 直接返回空。
 
         Note:
             ``self.klines`` 与 ``self._date_values`` 都是**原始K线**；
-            内部的 ``_fenxing_detector.klines`` 才是包含合并后的序列。
+            内部的 ``_fenxing_detector.klines`` / ``mer`` 才是包含合并后的序列。
             笔的长度校验用原始日期（``_date_values``），分型的下标用合并后
             序列，二者口径不同，不要互换。
         """
-        self.klines = klines.reset_index(drop=True)
-        # 缓存日期数组供 searchsorted 使用（见 _count_klines_between）
-        self._date_values = self.klines["date"].values
-        self._fenxing_detector = FenxingDetector(klines)
+        # list(...) 拷贝一份，避免调用方后续改动原列表影响本对象
+        self.klines: list[KLine] = list(klines)
+        # 缓存日期数组供 searchsorted 使用（见 _count_klines_between）。
+        # 走 pd.to_datetime 是为了让 dtype 固定为 datetime64[ns]，与原先直接取
+        # DataFrame["date"].values 完全一致，避免 searchsorted 精度差异
+        self._date_values = pd.to_datetime(pd.Series([k.date for k in self.klines], dtype="object")).values
+        self._fenxing_detector = FenxingDetector(self.klines)
         self._fenxings: list[Fenxing] = []
 
-    @property
-    def processed_klines(self) -> pd.DataFrame:
-        """
-        包含处理后的 K 线序列（即分型与笔真正跑在上面的那个序列）。
+    # @property
+    # def processed_klines(self) -> list[MergedKLine]:
+    #     """
+    #     包含处理后的 K 线序列（即分型与笔真正跑在上面的那个序列）。
 
-        Note:
-            与 ``self.klines``（原始K线）不同：这个序列更短、下标已重排。
-            需要对外画出与笔一致的图形时用这个，需要原始行情时用 ``klines``。
-        """
-        return self._fenxing_detector.klines
+    #     Note:
+    #         与 ``self.klines``（原始K线）不同：这个序列更短、下标已重排。
+    #         需要对外画出与笔一致的图形时用这个，需要原始行情时用 ``klines``。
+    #     """
+    #     return self._fenxing_detector.merged_klines
 
     @staticmethod
     def compress_fenxings(fenxings: list[Fenxing]) -> list[Fenxing]:
@@ -194,7 +198,7 @@ class BiDetector:
         # np.datetime64 显式转换：部分 numpy/pandas 版本组合下，datetime64 数组与裸
         # datetime/Timestamp 标量比较会抛 TypeError，需先转换为同类型再比较
         # side="left"：命中已有日期时取其首次出现位置，保证 start 自身被计入
-        left = int(np.searchsorted(dates, np.datetime64(start), side="left"))
+        left = int(np.searchsorted(dates, np.datetime64(start), side="left")) # type: ignore
         # side="right"：跳过所有与 end 相同的日期，保证 end 自身被计入区间
-        right = int(np.searchsorted(dates, np.datetime64(end), side="right"))
+        right = int(np.searchsorted(dates, np.datetime64(end), side="right")) # type: ignore
         return max(0, right - left)

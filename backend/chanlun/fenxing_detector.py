@@ -22,7 +22,8 @@ from datetime import datetime
 from typing import Literal
 
 import numpy as np
-import pandas as pd
+
+from .elements import KLine, MergedKLine, IncludedRaw
 
 
 @dataclass
@@ -60,13 +61,23 @@ class FenxingDetector:
     这样可以在不丢失有效波动的前提下压缩噪音，保留后续笔检测真正需要的
     「摆动形态」。
     """
-    def __init__(self, klines: pd.DataFrame):
+    def __init__(self, klines: list[KLine]):
         """
         Args:
-            klines: 原始K线 DataFrame，需包含 date/open/high/low/close（volume 可选）。
-                构造完成后 ``self.klines`` 会被替换为**包含处理后的**合并序列。
+            klines: 原始K线序列（需按时间升序），元素为 :class:`KLine`。
+                构造完成后：
+
+                - ``self.raw_klines`` 仍是**原始**序列；
+                - ``self.merged_klines`` 是保留包含关系的合并K线对象（供前端画合并区间）。
+
+        Note:
+        TODO 修改注释？？？？？？？？
+            三个属性各有用途，别混用：分型 / 笔跑在 ``klines`` 与 ``mer`` 上
+            （二者等长、下标一一对应），而定位原始K线要用 ``mer[i].lst`` 里
+            元素的 ``idx``。
         """
-        self.klines = klines.reset_index(drop=True)
+        self.raw_klines: list[KLine] = list(klines)
+        self.merged_klines: list[MergedKLine] = []
         self._process_inclusion()
 
     def _process_inclusion(self):
@@ -83,28 +94,25 @@ class FenxingDetector:
             合并后序列长度 ≤ 原始K线数量，因此所有基于分型的下标都必须
             重新编号，切勿与原始下标混用。
         """
-        df = self.klines
-        # 空表直接返回：下面 out_* 都以 highs[0] 等索引初始化，空表会越界
-        if df.empty:
+        src = self.raw_klines
+        # 空序列直接返回：下面 out_* 都以 src[0] 初始化，空列表会越界
+        if not src:
             return
 
-        # 转成 numpy 数组：循环里用 ndarray 下标取数，比 DataFrame 的 .iloc 逐行访问快得多
-        highs = df["high"].to_numpy(dtype=float)
-        lows = df["low"].to_numpy(dtype=float)
-        opens = df["open"].to_numpy(dtype=float)
-        closes = df["close"].to_numpy(dtype=float)
-        dates = df["date"].tolist()
-        volumes = df["volume"].to_numpy(dtype=float) if "volume" in df.columns else np.zeros(len(df))
-
         # 合并序列以第 0 根为基准；之后每根K线要么「追加」为新根，要么「并入」末尾
-        out_high = [highs[0]]
-        out_low = [lows[0]]
-        out_open = [opens[0]]
-        out_close = [closes[0]]
-        out_date = [dates[0]]
-        out_vol = [float(volumes[0])]
+        first = src[0]
+        out_high = [first.high]
+        out_low = [first.low]
+        out_open = [first.open]
+        out_close = [first.close]
+        out_date = [first.date]
+        out_vol = [float(first.volume or 0)]
+        # 每根合并K线覆盖的原始K线分组 —— 这就是老实现丢掉的「包含关系」
+        groups: list[list[KLine]] = [[first]]
+        # 合并方向：首根先记 up，真正发生包含时才会被 merge_direction 覆盖
+        out_dir = ["up"]
 
-        def merge_direction(prev_h, prev_l, before_h, before_l, cur_h, cur_l) -> str:
+        def merge_direction(prev_h, prev_l, before_h, before_l, cur_h, cur_l) -> Literal["up", "down"]:
             """
             确定包含合并的方向（"up" 取 max / "down" 取 min）。
 
@@ -137,8 +145,9 @@ class FenxingDetector:
             # 第二级：前两根无明确方向时，改用当前根相对前一根来定
             return "up" if cur_h >= prev_h and cur_l >= prev_l else "down"
 
-        for i in range(1, len(df)):
-            cur_h, cur_l = highs[i], lows[i]
+        for i in range(1, len(src)):
+            k = src[i]
+            cur_h, cur_l = k.high, k.low
             # 始终与「合并序列的末尾一根」比较，而不是原始前一根
             prev_h, prev_l = out_high[-1], out_low[-1]
             # 包含判定：区间互相套住即算包含，两个方向都要判：
@@ -149,13 +158,15 @@ class FenxingDetector:
                 or (cur_l <= prev_l and cur_h >= prev_h)
             )
             if not contained:
-                # 无包含 → 原样追加为新的一根合并K线
+                # 无包含 → 原样追加为新的一根合并K线（自成一组）
                 out_high.append(cur_h)
                 out_low.append(cur_l)
-                out_open.append(opens[i])
-                out_close.append(closes[i])
-                out_date.append(dates[i])
-                out_vol.append(float(volumes[i]))
+                out_open.append(k.open)
+                out_close.append(k.close)
+                out_date.append(k.date)
+                out_vol.append(float(k.volume or 0))
+                groups.append([k])
+                out_dir.append("up")
                 continue
 
             # 处理K线的包含关系
@@ -174,24 +185,34 @@ class FenxingDetector:
                 out_high[-1] = min(prev_h, cur_h)
                 out_low[-1] = min(prev_l, cur_l)
             # 收盘价取最新一根：合并K线的收盘 = 这段区间的最后一根收盘
-            out_close[-1] = closes[i]
+            out_close[-1] = k.close
             # 成交量累加：合并后的K线代表多根原始K线的成交总量
-            out_vol[-1] += float(volumes[i])
+            out_vol[-1] += float(k.volume or 0)
+            # 记录本次合并的方向，供前端按 up/down 画红/绿框
+            out_dir[-1] = direction
+            # 关键：把这根K线并入当前分组，保留「谁被谁包住了」的信息
+            groups[-1].append(k)
             if not prev_contains:
                 # 只有「前一根包住当前根」时才把日期推进到当前K线。
                 # 反过来（当前根包住前一根）时，前一根的日期才是这段合并K线的
                 # 起点，继续沿用原日期，避免分型日期被无意义地往后挪。
-                out_date[-1] = dates[i]
+                out_date[-1] = k.date
 
-        # 用合并结果重建 DataFrame 并重排索引 —— 此后 self.klines 即「合并后序列」
-        self.klines = pd.DataFrame({
-            "date": out_date,
-            "open": out_open,
-            "high": out_high,
-            "low": out_low,
-            "close": out_close,
-            "volume": out_vol,
-        }).reset_index(drop=True)
+        n = len(out_high)
+        for i in range(n):
+            include: list[IncludedRaw] = list()
+            for j in range(len(groups[i])):
+                include.append(IncludedRaw(date=groups[i][j].date, high=groups[i][j].high, low=groups[i][j].low))
+            self.merged_klines.append(MergedKLine(start=groups[i][0].date,
+                                                  end=groups[i][-1].date,
+                                                  start_idx=-1,
+                                                  end_idx=-1,
+                                                  high=out_high[i],
+                                                  low=out_low[i],
+                                                  dir=out_dir[i], # type: ignore
+                                                  count=len(groups[i]),
+                                                  fx=None,
+                                                  included=include))
 
     def detect(self) -> list[Fenxing]:
         """
@@ -209,14 +230,14 @@ class FenxingDetector:
             返回的 ``Fenxing.index`` 是**合并后序列**的下标，不是原始K线下标。
             合并会让序列变短，用它去原始 DataFrame 取行会错位。
         """
-        df = self.klines
-        n = len(df)
+        kl = self.merged_klines
+        n = len(kl)
         if n < 3:
             return []
 
-        highs = df["high"].to_numpy(dtype=float)
-        lows = df["low"].to_numpy(dtype=float)
-        dates = df["date"].tolist()
+        highs = np.array([k.high for k in kl], dtype=float)
+        lows = np.array([k.low for k in kl], dtype=float)
+        dates = [k.start for k in kl]
         fenxings: list[Fenxing] = []
 
         # 三个错位切片构成「滑动三元组」：(前一根, 中间根, 后一根)，全程向量化，
@@ -251,6 +272,8 @@ class FenxingDetector:
         for i in np.flatnonzero(top_mask):
             # +1 补回错位切片的偏移：mask 第 i 项 → 合并序列第 i+1 根
             idx = int(i) + 1
+            # 回填分型：self.mer 与 self.klines 等长，可直接用同一 idx
+            self.merged_klines[idx].fx = "top"
             fenxings.append(
                 Fenxing(
                     date=dates[idx],
@@ -264,6 +287,7 @@ class FenxingDetector:
         for i in np.flatnonzero(bottom_mask):
             # 同样 +1 还原到合并序列下标
             idx = int(i) + 1
+            self.merged_klines[idx].fx = "bottom"
             fenxings.append(
                 Fenxing(
                     date=dates[idx],

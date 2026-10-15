@@ -101,6 +101,7 @@ const mainInds = [
 ]
 
 const chanlunInds = [
+  { key: 'mergedKlines' as const, label: '合并K线', dotStyle: { background: 'linear-gradient(90deg, #f85149, #3fb950)', border: '1px solid #6e7681' } },
   { key: 'bis' as const, label: '笔', dotStyle: { background: 'linear-gradient(90deg, #f85149, #3fb950)' } },
   { key: 'xians' as const, label: '线段', dotStyle: { background: 'linear-gradient(90deg, #ffe066, #ff9f7f)' } },
   { key: 'zhongshus' as const, label: '中枢', dotStyle: { background: '#bc8cff' } },

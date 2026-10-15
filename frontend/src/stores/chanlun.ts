@@ -17,6 +17,8 @@ export interface IndicatorConfig {
   signals: boolean
   aiLines: boolean
   supportResistance: boolean
+  /** 主图上画包含处理后的合并K线（空心矩形 up红/down绿 + 蓝色被包含线，参考 chan.py 出图） */
+  mergedKlines: boolean
   // 副图
   volume: boolean
   macd: boolean
@@ -35,6 +37,8 @@ export const defaultIndicators: IndicatorConfig = {
   signals: true,
   aiLines: true,
   supportResistance: true,
+  /** 默认开启：合并K线是分型/笔的基础，画出来才看得出包含处理做了什么 */
+  mergedKlines: true,
   volume: true,
   macd: true,
   rsi: false,
