@@ -1,3 +1,14 @@
+"""缠论相关 HTTP 路由：单级别分析 / 多级别并行分析 / AI 策略信号。
+
+本层只做三件事：
+
+    1. 限流（check_chanlun_rate_limits，多级别按级别数扣 token）；
+    2. 参数校验与缓存读写（单级别结果缓存在 core 层，多级别与 AI 信号缓存在这里）；
+    3. 用 asyncio.to_thread 把同步的取数/计算丢线程池，避免阻塞事件循环。
+
+业务编排在 core/chanlun_analysis.py，AI 策略编排在本文件的
+build_ai_signal_response()，算法在 chanlun/。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +47,19 @@ async def analyze_chanlun(
         pattern="^(1min|5min|15min|30min|60min|daily|weekly|monthly)$",
     ),
 ):
+    """单级别缠论完整分析：笔 / 线段 / 中枢 / 买卖点 / 支撑压力位。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        code: 股票代码。
+        level: 分析级别，默认 daily；白名单由 Query pattern 约束。
+
+    Returns:
+        serialize_chanlun_analysis 产出的响应字典。
+
+    Note:
+        固定使用 DEFAULT_KLINE_LIMIT(500) 窗口，因此能命中详情页的同一条缓存。
+    """
     check_chanlun_rate_limits(client_ip(request))
     result = await asyncio.to_thread(run_analysis, code, level)
     return serialize_chanlun_analysis(result)
@@ -50,10 +74,30 @@ async def chanlun_multi_level(
         description="逗号分隔的分析级别，如 daily,weekly,30min",
     ),
 ):
+    """多级别并行缠论分析：一次拿 daily / weekly / 30min 等若干个级别的结论。
+
+    流程：拆分并去重级别 → 按级别数扣限流 token（最多 4）→ 查多级别聚合缓存 →
+    线程池并行算各级别 → 按请求顺序组装 → 写聚合缓存。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        code: 股票代码。
+        levels: 逗号分隔的级别串，默认 "daily,weekly,30min"。
+
+    Returns:
+        {"code", "levels": {级别: 结果或降级字符串}, "count", "elapsed_ms"}。
+
+    Note:
+        单个级别失败不会让整个请求失败，会被降级成字符串 "数据不足"（见 _safe_analyze）。
+        聚合缓存的失效由 core 层的 run_analysis 用 delete_prefix 触发。
+    """
+    # 去空白 + 去重（dict.fromkeys 保序），避免同一级别重复计算
     level_list = [l.strip() for l in levels.split(",") if l.strip()]
     level_list = list(dict.fromkeys(level_list))
+    # 按级别数扣 token，但上限 4：防止一次请求传入几十个级别打满配额外的负载
     check_chanlun_rate_limits(client_ip(request), tokens=min(len(level_list), 4))
 
+    # 聚合缓存键含级别组合：不同组合是不同结果；失效时由 core 层按 code 前缀删
     cache_key = f"multi:{code}:{','.join(level_list)}"
     cached = chanlun_multi_cache.get(cache_key)
     if cached is not None:
@@ -62,6 +106,10 @@ async def chanlun_multi_level(
     t0 = time.time()
 
     def _serialize_result(result: ChanlunAnalysis) -> dict:
+        """把单个级别的结果裁剪成多级别概览（不含 K 线，避免响应过大）。
+
+        只保留最近 3 个买卖点与最近 5 个支撑压力位，够前端做级别对比即可。
+        """
         return {
             "level": result.level,
             "trend": result.trend,
@@ -90,9 +138,23 @@ async def chanlun_multi_level(
             ],
         }
 
+    # 由工作线程写入；CPython 下 dict 赋值是原子操作，GIL 保证不会写坏
     results: dict[str, dict | str] = {}
 
     def _safe_analyze(level: str) -> tuple[str, dict | str]:
+        """在工作线程里算一个级别，任何失败都降级成字符串而不是抛出。
+
+        Args:
+            level: 单个分析级别。
+
+        Returns:
+            (level, 结果 dict) 或 (level, "数据不足")。
+
+        Note:
+            这里刻意吞掉所有异常（HTTPException 连日志都不打），
+            代价是真实故障（数据源超时、代码 bug）也会静默变成 "数据不足"，
+            排查时只能靠 debug 级日志，生产环境默认看不到。
+        """
         try:
             result = run_analysis(code, level, kline_limit=DEFAULT_KLINE_LIMIT)
             return level, _serialize_result(result)
@@ -103,14 +165,21 @@ async def chanlun_multi_level(
             return level, "数据不足"
 
     def _run_pool():
+        """在线程池里并行跑所有级别，谁先完成先收谁。
+
+        整个函数被 asyncio.to_thread 包一层，因此内部的阻塞等待不会卡住事件循环。
+        """
         with ThreadPoolExecutor(max_workers=min(len(level_list), 4)) as pool:
             futures = {pool.submit(_safe_analyze, lv): lv for lv in level_list}
+            # as_completed：不按提交顺序等待，慢级别不拖慢其它级别的收集
             for future in as_completed(futures):
+                # _safe_analyze 自身不会抛异常，timeout 只是兜底防死等
                 lv, data = future.result(timeout=60)
                 results[lv] = data
 
     await asyncio.to_thread(_run_pool)
 
+    # 按请求里的级别顺序输出；results 里没有的（理论上是线程被取消）标为“未知错误”
     ordered = {lv: results.get(lv, "未知错误") for lv in level_list}
     t1 = time.time()
     payload = {
@@ -124,22 +193,57 @@ async def chanlun_multi_level(
 
 
 def _ai_signal_cache_key(code: str, level: str, model: str, use_llm: bool) -> str:
+    """构造 AI 信号的缓存键。
+
+    use_llm 必须进键：规则结果与 LLM 增强结果是两套完全不同的输出，
+    且调用方会据此选择 ai_signal_rule_cache / ai_signal_llm_cache 两个不同实例。
+
+    Returns:
+        "ai:code:level:model:llm|rule"。
+    """
     return f"ai:{code}:{level}:{model}:{'llm' if use_llm else 'rule'}"
 
 
 def build_ai_signal_response(code: str, level: str, model: str, use_llm: bool) -> dict:
-    """规则策略 + 可选 LLM；供线程池与缓存复用。"""
+    """生成 AI 策略信号：缠论结果 → 背驰 → 波浪分类 → 规则引擎 →（可选）LLM 覆盖。
+
+    完整链路：
+
+        1. get_kline_df_for_ai()：拿 K 线 DataFrame + 缠论结果（复用缓存，不重复拉行情）；
+        2. DivergenceDetector：在最近 200 根上检测背驰；
+        3. WaveClassifier：把线段/中枢映射成趋势标签；
+        4. StrategyEngine：规则引擎产出买卖方向、置信度、止损止盈；
+        5. 30min 级别额外算一次日线共振；
+        6. use_llm 为真时再让大模型给出建议，并逐字段覆盖规则结果。
+
+    Args:
+        code: 股票代码。
+        level: 分析级别。
+        model: LLM 模型名（deepseek / gemini），use_llm 为假时不实际调用。
+        use_llm: 是否调用大模型增强。
+
+    Returns:
+        响应字典；其中 llm 段描述本次是否真的用上了大模型（used / error / skipped）。
+
+    Note:
+        纯同步函数，路由里用 asyncio.to_thread 调用；LLM 异常不会抛出，
+        会退化成纯规则结果并把错误放进 llm.error。
+    """
     df_for_ai, result = get_kline_df_for_ai(code, level)
+    # 现价取最后一根 K 线收盘价；空结果兜 0，交给规则引擎降级处理
     current_price = float(result.klines[-1].close) if result.klines else 0.0
 
     divergence = None
     if not df_for_ai.empty:
         try:
+            # 背驰只看近期结构，最多喂 200 根，控制计算量
             div_detector = DivergenceDetector(df_for_ai.tail(200))
             divergence = div_detector.check_divergence(result.bis)
         except Exception:
+            # 背驰是增强项，失败不应拖垮整个信号生成
             log.debug("背驰检测失败 code=%s", code, exc_info=True)
 
+    # 波浪分类：把线段与中枢折算成趋势标签，规则引擎据此挑策略
     classifier = WaveClassifier()
     wave_class = classifier.classify(result.xians, result.zhongshus, current_price)
 
@@ -154,9 +258,11 @@ def build_ai_signal_response(code: str, level: str, model: str, use_llm: bool) -
     signal = engine.generate_signal()
     signal.stock_code = code
 
+    # 只有 30min 才做日线共振：更细的级别噪声太大，日线以上本身就是大级别
     resonance = None
     if level == "30min":
         try:
+            # 日线结果优先走缓存；未命中才真算，并回写缓存避免下一只股票重复拉
             daily_key = chanlun_cache_key(code, "daily", DEFAULT_KLINE_LIMIT)
             daily_result = chanlun_cache.get(daily_key)
             if daily_result is None:
@@ -192,6 +298,7 @@ def build_ai_signal_response(code: str, level: str, model: str, use_llm: bool) -
                 zhongshus=[z.__dict__ for z in result.zhongshus],
                 bis=[b.__dict__ for b in result.bis],
             )
+            # temperature 压到 0.3：策略输出要稳定，不要创造性
             raw = llm.chat(prompt, system=SYSTEM_PROMPT, temperature=0.3)
             llm_result = parse_llm_response(raw)
             if not isinstance(llm_result, dict):
@@ -201,8 +308,12 @@ def build_ai_signal_response(code: str, level: str, model: str, use_llm: bool) -
             llm_error = str(e)
             log.warning("LLM 策略生成失败 code=%s model=%s: %s", code, model, e)
 
+    # lr 为 None 表示「没用上 LLM」，下面所有字段整体回落到规则结果
     lr = llm_result if isinstance(llm_result, dict) else None
 
+    # LLM 字段逐项覆盖规则结果。注意 `lr.get(x) or signal.y` 是短路语义：
+    # LLM 给出 0 / "" / False 这类合法值时会被当成“没给”而静默回落到规则值
+    # （confidence=0、entry_price=0 等场景会受影响）
     return {
         "stock_code": signal.stock_code,
         "level": signal.level,
@@ -237,19 +348,41 @@ async def ai_signal(
         description="为 true 时调用大模型增强；默认仅规则引擎，响应更快",
     ),
 ):
+    """AI 策略信号：规则引擎打底，可选让大模型润色/覆盖。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        code: 股票代码。
+        level: 分析级别，默认 daily。
+        model: deepseek / gemini。
+        use_llm: 默认 False，仅走规则引擎（快、无外部依赖）。
+
+    Returns:
+        build_ai_signal_response 产出的响应字典。
+
+    Raises:
+        HTTPException: 404 由底层（K 线不足）原样透传；其它异常包成 500。
+
+    Note:
+        规则结果与 LLM 结果用不同的缓存实例，避免调一次 LLM 后
+        把纯规则请求也污染成 LLM 结果。
+    """
     check_chanlun_rate_limits(client_ip(request))
 
     cache_key = _ai_signal_cache_key(code, level, model, use_llm)
+    # 两套缓存分开存：规则结果便宜可长缓存，LLM 结果贵且慢
     cache = ai_signal_llm_cache if use_llm else ai_signal_rule_cache
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     try:
+        # 整条链路（取数 + 缠论 + 背驰 + 规则 + LLM）都是同步的，丢线程池
         payload = await asyncio.to_thread(build_ai_signal_response, code, level, model, use_llm)
         cache.set(cache_key, payload)
         return payload
     except HTTPException:
+        # K 线不足等业务错误原样透传，不要包成 500
         raise
     except Exception as e:
         raise HTTPException(

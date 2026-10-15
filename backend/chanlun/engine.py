@@ -1,5 +1,20 @@
 """
-缠论分析引擎 — 整合所有组件
+缠论分析引擎 — 整合所有组件，是本包对外的唯一入口。
+
+链路位置::
+
+    原始K线 → 包含处理 → 分型 → 笔 → 线段 → 中枢 → 买卖点/支撑阻力
+    ↑__________________ 本模块负责按序编排 __________________↑
+
+用法::
+
+    engine = ChanlunEngine(klines_df)
+    result = engine.analyze(level="daily")
+
+Note:
+    引擎内部计算用的是**包含合并后序列**（由 ``BiDetector`` 内部的
+    ``FenxingDetector`` 产出），但对外返回的 ``klines`` 是**原始 OHLC**，
+    详见 ``_to_klines`` 的说明。
 """
 import pandas as pd
 from datetime import datetime
@@ -22,12 +37,26 @@ class ChanlunEngine:
 
     def __init__(self, klines: pd.DataFrame):
         """
-        klines: DataFrame, columns=[date, open, high, low, close, volume]
+        Args:
+            klines: DataFrame，列为 [date, open, high, low, close, volume]；
+                也支持中文列名，会在 ``_ensure_columns`` 里自动映射。
+
+        Note:
+            构造时先 ``copy()``，避免后续 ``rename`` / ``sort_values``
+            污染调用方传入的原始 DataFrame。
         """
         self.raw_klines = klines.copy()
         self._ensure_columns()
 
     def _ensure_columns(self):
+        """
+        规范化输入 DataFrame：中文列名 → 英文列名，日期转 datetime，并按日期升序排序。
+
+        Note:
+            列名映射覆盖了常见数据源的中文表头；``'时间'`` 与 ``'日期'`` 都映射到
+            ``date``。若数据源用的是其它列名（如 ``'Date'``），需在上层先统一。
+            排序与重建索引是必须的：笔 / 线段 / 中枢的滑动窗口都依赖严格升序。
+        """
         col_map = {
             '日期': 'date', '开盘': 'open', '收盘': 'close',
             '最高': 'high', '最低': 'low', '成交量': 'volume',
@@ -40,7 +69,30 @@ class ChanlunEngine:
         self.raw_klines.reset_index(drop=True, inplace=True)
 
     def analyze(self, level: str = "daily") -> ChanlunAnalysis:
-        """执行完整缠论分析"""
+        """
+        执行完整缠论分析，返回结构化的 ``ChanlunAnalysis``。
+
+        Args:
+            level: 级别标签（如 "daily" / "30min"），仅作为标记原样写入结果，
+                不影响任何计算逻辑。
+
+        Returns:
+            包含原始K线、笔、线段、中枢、买卖点、走势与支撑阻力的完整结果。
+
+        Note:
+            编排顺序是**严格依赖**的，共 7 步，不可调换：
+
+            1. 笔检测（内部已含包含处理与分型识别）；
+            2. ——（分型已合并在第 1 步内）；
+            3. 线段识别（依赖笔）；
+            4. 中枢识别（依赖线段）；
+            5. 买卖点判定（依赖笔 + 线段 + 中枢）与走势判断；
+            6. 生成对外返回的 K 线对象（原始 OHLC）；
+            5b. 支撑阻力位（依赖 K 线与第 5 步的买卖点）；
+            7. 自然语言总结。
+
+            其中 5b 必须在 6 之后 —— 它要用到第 6 步产出的 ``kline_objects``。
+        """
         # 笔检测器内部已完成分型识别与包含处理，无需单独跑一遍分型
         bi_detector = BiDetector(self.raw_klines)
         bis = bi_detector.detect(min_bars=5)
@@ -60,7 +112,7 @@ class ChanlunEngine:
         # 6. K 线对象：API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
         kline_objects = self._to_klines()
 
-        # 5b. 支撑阻力位
+        # 5b. 支撑阻力位：需要第 6 步产出的 kline_objects，故排在其后
         klines_dict = [{"date": k.date, "high": k.high, "low": k.low} for k in kline_objects]
         support_resistance = sig_detector.detect_support_resistance(klines_dict, signals)
 
@@ -81,11 +133,28 @@ class ChanlunEngine:
         )
 
     def _to_klines(self, df: pd.DataFrame | None = None) -> list[KLine]:
-        """默认返回原始 K 线窗口；传入 df 时可序列化任意 DataFrame。"""
+        """
+        把 DataFrame 转成 ``KLine`` 对象列表。
+
+        Args:
+            df: 可选。传入时序列化该 DataFrame；不传则用 ``self.raw_klines``。
+
+        Returns:
+            ``KLine`` 列表。
+
+        Note:
+            默认返回的是**原始 OHLC**，而不是包含合并后的序列。原因：
+
+            - 前端要画的是真实行情（开高低收），合并序列会丢信息；
+            - 笔 / 中枢的端点只有**日期**没有合并后下标，前端靠
+              ``dateToIdxRobust`` 这类按日期查找的映射把它们对齐到原始K线上；
+              若这里返回合并序列，日期对不上就会错位。
+        """
         source = df if df is not None else self.raw_klines
         rows: list[KLine] = []
         for row in source.itertuples(index=False):
             d = row.date
+            # pandas Timestamp → python datetime，保证 pydantic 直接校验通过
             if hasattr(d, "to_pydatetime"):
                 d = d.to_pydatetime()
             rows.append(
@@ -95,6 +164,7 @@ class ChanlunEngine:
                     high=float(row.high),
                     low=float(row.low),
                     close=float(row.close),
+                    # 用 getattr 兜底：数据源可能缺 volume / amount 列
                     volume=float(getattr(row, "volume", 0) or 0),
                     amount=float(getattr(row, "amount", 0) or 0),
                 )
@@ -103,7 +173,23 @@ class ChanlunEngine:
 
     def _make_summary(self, trend: str, signals: list[BuySellPoint],
                       zhongshus: list[Zhongshu]) -> str:
+        """
+        生成一段简短的自然语言总结，供前端直接展示。
+
+        Args:
+            trend:     当前走势（上涨 / 下跌 / 盘整 / 未知）
+            signals:   已检出的买卖点（按时间升序）
+            zhongshus: 已检出的中枢（按时间升序）
+
+        Returns:
+            形如「当前走势: 上涨 | 中枢区间: [x, y] | 最近信号: 一买 @ z」的字符串。
+
+        Note:
+            只取**最后一个**中枢和**最后一个**信号（即当下的状态），
+            历史中枢 / 信号不出现在总结里。
+        """
         parts = [f"当前走势: {trend}"]
+        # 只描述当前所处的最后一个中枢
         if zhongshus:
             last_zs = zhongshus[-1]
             parts.append(

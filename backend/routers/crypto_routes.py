@@ -1,4 +1,11 @@
-"""加密货币行情与缠论分析路由（Binance 数据源）。"""
+"""加密货币行情与缠论分析路由（Binance 数据源）。
+
+HTTP 层职责只做三件事：限流 → 参数校验（Query pattern / 范围）→
+把同步的取数与计算用 asyncio.to_thread 丢线程池，避免阻塞事件循环。
+真正的取数在 services/binance_service.py，缠论编排在 core/crypto_analysis.py。
+
+与 A 股路由的关键差异：加密货币多支持一个 4h 级别（Binance 原生周期）。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -14,11 +21,21 @@ from services.binance_service import get_kline_hist, get_realtime_quote, normali
 router = APIRouter()
 log = logging.getLogger(__name__)
 
+# 比 A 股的级别白名单多一个 4h：Binance 原生提供 4 小时线，A 股无此周期
 LEVEL_PATTERN = "^(1min|5min|15min|30min|60min|4h|daily|weekly|monthly)$"
 
 
 @router.get("/api/crypto/search", tags=["加密货币"], summary="搜索交易对")
 async def crypto_search(request: Request, q: str = Query(..., min_length=1)):
+    """按关键字搜索交易对（轻量接口，走轻限流）。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        q: 关键字，如 "BTC"，至少 1 个字符。
+
+    Returns:
+        {"results": [...]}，由数据源决定字段结构。
+    """
     check_light_api_rate_limits(client_ip(request))
     results = await asyncio.to_thread(search_symbols, q)
     return {"results": results}
@@ -26,6 +43,18 @@ async def crypto_search(request: Request, q: str = Query(..., min_length=1)):
 
 @router.get("/api/crypto/{symbol}/quote", tags=["加密货币"], summary="24 小时行情快照")
 async def crypto_quote(request: Request, symbol: str):
+    """获取交易对 24 小时行情快照（轻量接口，走轻限流）。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        symbol: 交易对，路由里不做格式校验，由数据源归一化。
+
+    Returns:
+        行情快照字典。
+
+    Raises:
+        HTTPException: 404，数据源没返回该交易对的数据。
+    """
     check_light_api_rate_limits(client_ip(request))
     quote = await asyncio.to_thread(get_realtime_quote, symbol)
     if not quote:
@@ -40,6 +69,20 @@ async def crypto_kline(
     level: str = Query("daily", pattern=LEVEL_PATTERN),
     limit: int = Query(500, ge=20, le=1000),
 ):
+    """获取交易对 K 线（走 K 线限流）。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        symbol: 交易对。
+        level: K 线级别，须匹配 LEVEL_PATTERN，默认 daily。
+        limit: 返回根数，20~1000（下限 20 是缠论成笔的最低要求）。
+
+    Returns:
+        {"symbol": 归一化后的交易对, "level": ..., "klines": [...]}。
+
+    Raises:
+        HTTPException: 404，数据源返回空表。
+    """
     check_kline_rate_limits(client_ip(request))
     df = await asyncio.to_thread(get_kline_hist, symbol, level, limit)
     if df.empty:
@@ -54,6 +97,17 @@ async def crypto_chanlun(
     level: str = Query("daily", pattern=LEVEL_PATTERN),
     limit: int = Query(DEFAULT_KLINE_LIMIT, ge=20, le=1000),
 ):
+    """加密货币缠论完整分析（走缠论限流，计算最重）。
+
+    Args:
+        request: 用于取客户端 IP 做限流。
+        symbol: 交易对，先经 normalize_symbol 归一化再查缓存。
+        level: K 线级别，须匹配 LEVEL_PATTERN。
+        limit: 参与分析的 K 线窗口，20~1000。
+
+    Returns:
+        serialize_crypto_analysis 产出的响应字典。
+    """
     check_chanlun_rate_limits(client_ip(request))
     result = await asyncio.to_thread(run_crypto_analysis, normalize_symbol(symbol), level, limit)
     return serialize_crypto_analysis(result)
