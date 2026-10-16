@@ -1,8 +1,8 @@
 """
 走势自动分类 — 上涨/下跌/盘整
 """
-from newchan.Seg.Seg import CSeg
-from newchan.ZS.ZS import CZS
+from chan.Seg.Seg import CSeg
+from chan.ZS.ZS import CZS
 
 
 class WaveClassifier:

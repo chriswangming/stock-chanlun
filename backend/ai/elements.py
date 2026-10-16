@@ -14,7 +14,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from newchan.BuySellPoint.BS_Point import CBS_Point
+from chan.BuySellPoint.BS_Point import CBS_Point
 
 
 class AiSignal(BaseModel):

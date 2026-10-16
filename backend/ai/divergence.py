@@ -24,7 +24,7 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 
-from newchan.Bi.Bi import CBi
+from chan.Bi.Bi import CBi
 
 
 # MACD：后一段面积低于前一段该比例以下视为力度显著减弱

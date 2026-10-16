@@ -18,12 +18,12 @@ import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
-from newchan.BuySellPoint.BS_Point import CBS_Point
-from newchan.ChanConfig import CChanConfig
-from newchan.Common.CEnum import DATA_FIELD, KL_TYPE
-from newchan.Common.CTime import CTime
-from newchan.KLine.KLine_List import CKLine_List
-from newchan.KLine.KLine_Unit import CKLine_Unit
+from chan.BuySellPoint.BS_Point import CBS_Point
+from chan.ChanConfig import CChanConfig
+from chan.Common.CEnum import DATA_FIELD, KL_TYPE
+from chan.Common.CTime import CTime
+from chan.KLine.KLine_List import CKLine_List
+from chan.KLine.KLine_Unit import CKLine_Unit
 from services.akshare_service import (
     get_daily_hot_stocks,
     get_kline_hist,

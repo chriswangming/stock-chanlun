@@ -23,11 +23,11 @@ from ai.divergence import DivergenceDetector
 from ai.llm_client import get_llm_client
 from ai.strategy_engine import StrategyEngine
 from ai.wave_classifier import WaveClassifier
-from newchan.ChanConfig import CChanConfig
-from newchan.Chan import CChan
-from newchan.Common.CEnum import AUTYPE, KL_TYPE, DATA_SRC
-from newchan.Common.ChanException import CChanException
-from newchan.Plot.ChanPicture import serialize_chanlun_analysis
+from chan.ChanConfig import CChanConfig
+from chan.Chan import CChan
+from chan.Common.CEnum import AUTYPE, KL_TYPE, DATA_SRC
+from chan.Common.ChanException import CChanException
+from chan.Plot.ChanPicture import serialize_chanlun_analysis
 from deps import check_chanlun_rate_limits, client_ip
 from utils import (
     ai_signal_llm_cache,

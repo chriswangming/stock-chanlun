@@ -4,8 +4,8 @@
 from typing import Optional
 
 from ai.elements import AiSignal
-from newchan.BuySellPoint.BS_Point import CBS_Point
-from newchan.ZS.ZS import CZS
+from chan.BuySellPoint.BS_Point import CBS_Point
+from chan.ZS.ZS import CZS
 
 
 # newchan 的 CBS_Point 不带置信度（它的 features 里只有 bsp_bi_amp 这类结构量），
