@@ -24,7 +24,7 @@ from .elements import (
 )
 from .bi_detector import BiDetector
 from .segment_detector import SegmentDetector
-from .signals import SignalDetector
+from .signal_detector import SignalDetector
 
 
 class ChanlunEngine:
@@ -86,12 +86,9 @@ class ChanlunEngine:
             2. ——（分型已合并在第 1 步内）；
             3. 线段识别（依赖笔）；
             4. 中枢识别（依赖线段）；
-            5. 买卖点判定（依赖笔 + 线段 + 中枢）与走势判断；
-            6. 生成对外返回的 K 线对象（原始 OHLC）；
+            5a. 买卖点判定（依赖笔 + 线段 + 中枢）与走势判断；
             5b. 支撑阻力位（依赖 K 线与第 5 步的买卖点）；
-            7. 自然语言总结。
-
-            其中 5b 必须在 6 之后 —— 它要用到第 6 步产出的 ``kline_objects``。
+            6. 自然语言总结。
         """
         # 1. 先把原始K线统一成 KLine 对象：笔检测与最终对外返回共用同一份，
         #    避免两次转换产生口径差异
@@ -108,19 +105,16 @@ class ChanlunEngine:
         # 4. 中枢识别
         zhongshus = seg_detector.detect_zhongshus(segments)
 
-        # 5. 买卖点判定
+        # 5a. 买卖点判定
         sig_detector = SignalDetector(bis, segments, zhongshus, level=level)
         signals = sig_detector.detect_all()
         trend = sig_detector.detect_trend()
-
-        # 6. K 线对象已在第 1 步生成（kline_objects），此处无需重复转换。
-        #    API/图表用原始 OHLC（笔/中枢在引擎内基于包含处理后序列计算，前端 dateToIdxRobust 映射）
 
         # 5b. 支撑阻力位：需要第 6 步产出的 kline_objects，故排在其后
         klines_dict = [{"date": k.date, "high": k.high, "low": k.low} for k in kline_objects]
         support_resistance = sig_detector.detect_support_resistance(klines_dict, signals)
 
-        # 7. 自然语言总结
+        # 6. 自然语言总结
         summary = self._make_summary(trend, signals, zhongshus)
 
         return ChanlunAnalysis(

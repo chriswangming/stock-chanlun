@@ -3,7 +3,7 @@ from chanlun.elements import ChanlunAnalysis
 from core.chanlun_analysis import level_to_period
 
 
-def serialize_chanlun_analysis(result: ChanlunAnalysis) -> dict:
+def serialize_chanlun_analysis(result: ChanlunAnalysis, save_to_local: bool = False) -> dict:
     """将 ChanlunAnalysis 转为前端 JSON（含 K 线，减少单独 /kline 请求）。"""
     klines = [
         {
@@ -18,6 +18,14 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis) -> dict:
     ]
     period = level_to_period(result.level)
     data_period_note = "5min" if result.level == "1min" else period
+    if save_to_local is True:
+        import json
+        from pathlib import Path
+        dir_path = Path(__file__).resolve().parent
+        dir_path.mkdir(parents=True, exist_ok=True)
+        with open(dir_path / f"{result.stock_code}.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
     return {
         "stock_code": result.stock_code,
         "level": result.level,

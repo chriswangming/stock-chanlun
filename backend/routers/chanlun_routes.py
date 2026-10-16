@@ -46,6 +46,10 @@ async def analyze_chanlun(
         "daily",
         pattern="^(1min|5min|15min|30min|60min|daily|weekly|monthly)$",
     ),
+    start_date: str = Query(
+        "start_date",
+        description="起始日期, 2026/05/06",
+    ),
 ):
     """单级别缠论完整分析：笔 / 线段 / 中枢 / 买卖点 / 支撑压力位。
 
@@ -53,6 +57,7 @@ async def analyze_chanlun(
         request: 用于取客户端 IP 做限流。
         code: 股票代码。
         level: 分析级别，默认 daily；白名单由 Query pattern 约束。
+        start_date: 起始日期。
 
     Returns:
         serialize_chanlun_analysis 产出的响应字典。
@@ -61,8 +66,8 @@ async def analyze_chanlun(
         固定使用 DEFAULT_KLINE_LIMIT(500) 窗口，因此能命中详情页的同一条缓存。
     """
     check_chanlun_rate_limits(client_ip(request))
-    result = await asyncio.to_thread(run_analysis, code, level)
-    return serialize_chanlun_analysis(result)
+    result = await asyncio.to_thread(run_analysis, code, level, start_date)
+    return serialize_chanlun_analysis(result, save_to_local=False)
 
 
 @router.get("/api/chanlun/{code}/multi-level", tags=["缠论"], summary="多级别并行缠论分析")

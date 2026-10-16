@@ -1,7 +1,7 @@
 """
 港股数据服务 - 使用富途 OpenD（futu-api）获取港股行情与 K 线
 
-与 akshare_service.py（A 股）、binance_service.py（加密货币）平行存在。
+与 akshare_service.py（A 股）平行存在。
 接口签名与返回结构刻意与 akshare_service 对齐，上层路由可以直接换数据源：
 
     get_kline_hist(...)      -> DataFrame[date, open, close, high, low, volume]
@@ -373,7 +373,7 @@ def is_hk_index(code: str) -> bool:
 
 # 项目内部周期串 -> futu KLType 属性名
 # 覆盖 core.chanlun_analysis.level_to_period 的产物（1min->"5", 15min->"15", daily...）
-# 以及 binance_service 那种 "5min"/"weekly" 写法
+# 以及 "5min"/"weekly" 这类通用周期串写法
 _PERIOD_TO_KL = {
     "1min": "K_1M", "1": "K_1M",
     "3min": "K_3M", "3": "K_3M",

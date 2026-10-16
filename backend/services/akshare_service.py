@@ -1,5 +1,8 @@
 """
-股票数据服务 - 使用腾讯财经 API 直接获取数据
+股票数据服务。
+
+K 线（日/周/月/分钟）走 baostock，其余行情（实时报价、板块、热门、新闻等）走
+腾讯 / 东方财富 / 新浪的 HTTP 接口。
 """
 import warnings
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
@@ -297,6 +300,328 @@ def get_realtime_quote(codes: list[str]) -> pd.DataFrame:
     return df
 
 
+# ─── baostock K 线数据源 ────────────────────────────────────────────────────
+# baostock 是「全局单会话」设计：login() 建立的 socket 整个进程共用，
+# 多线程并发调用会互相踩踏，因此所有查询都串在同一把锁里执行。
+try:
+    import baostock as bs
+except ImportError:  # 未安装时保持模块可导入，取数时降级为空 DataFrame
+    bs = None
+
+# 分钟级别（period 直接就是分钟数）
+_MINUTE_PERIODS = ("5", "15", "30", "60")
+# period → baostock frequency（d 日 / w 周 / m 月 / 数字=分钟）
+_BS_FREQ = {"daily": "d", "weekly": "w", "monthly": "m", "5": "5", "15": "15", "30": "30", "60": "60"}
+# adjust → baostock adjustflag（1 后复权 / 2 前复权 / 3 不复权），未知值按不复权
+_BS_ADJUSTFLAG = {"qfq": "2", "hfq": "1"}
+# 每根 K 线大致占用的日历天数，用来把 limit 反推成 start_date（已含冗余系数：
+# 日线按 250 交易日/年 ≈ 1.46 日历天/根，取 2 留 35% 余量；周/月同理放大）
+_BS_DAYS_PER_BAR = {"daily": 2.0, "weekly": 10.0, "monthly": 40.0, "5": 0.1, "15": 0.3, "30": 0.6, "60": 1.2}
+_BS_EARLIEST = "1990-01-01"
+# baostock 的 volume 单位是「股」，而本模块既有口径（腾讯实时/日线）是「手」，
+# 为保持 get_kline_hist 的输出语义不变，统一换算成手；需要原始股数时置为 False。
+_BS_VOLUME_TO_LOTS = True
+
+_bs_lock = threading.RLock()
+_bs_logged_in = False
+
+
+def _bs_login() -> bool:
+    """确保 baostock 已登录（幂等，失败可重入）。调用方需已持有 _bs_lock。"""
+    global _bs_logged_in
+    if bs is None:
+        log.error("[baostock] 未安装，无法获取K线：pip install baostock")
+        return False
+    if _bs_logged_in:
+        return True
+    try:
+        r = bs.login()
+    except Exception as e:
+        log.error(f"[baostock] 登录异常: {e}")
+        _bs_logged_in = False
+        return False
+    if r is None or r.error_code != "0":
+        log.error(f"[baostock] 登录失败: {getattr(r, 'error_code', None)} {getattr(r, 'error_msg', None)}")
+        _bs_logged_in = False
+        return False
+    _bs_logged_in = True
+    return True
+
+
+def _bs_query(bs_code: str, fields: str, start: str, end: str, freq: str, adjustflag: str) -> list[list[str]]:
+    """执行一次 baostock K 线查询，返回行列表（每行是字符串列表）；失败返回 []。
+
+    会话失效（服务端踢连接）时清掉登录态并重试一次，避免一次抖动导致整段取数为空。
+
+    Note:
+        baostock 的 ResultSet 用 error_code/error_msg 表达错误（不是异常），
+        因此每一步都要显式判 error_code，否则会把错误当空数据吞掉。
+    """
+    global _bs_logged_in
+    with _bs_lock:
+        for _attempt in (1, 2):
+            if not _bs_login():
+                return []
+            try:
+                rs = bs.query_history_k_data_plus(
+                    bs_code,
+                    fields,
+                    start_date=start,
+                    end_date=end,
+                    frequency=freq,
+                    adjustflag=adjustflag,
+                )
+            except Exception as e:
+                log.warning(f"[baostock] 查询异常 {bs_code} {freq}: {e}")
+                _bs_logged_in = False
+                continue
+            if rs is None or rs.error_code != "0":
+                log.warning(
+                    f"[baostock] 查询失败 {bs_code} {freq}: "
+                    f"{getattr(rs, 'error_code', None)} {getattr(rs, 'error_msg', None)}"
+                )
+                _bs_logged_in = False
+                continue
+            rows: list[list[str]] = []
+            # 流式读取：每行都要确认 error_code 仍为 0，中途出错就停止
+            while rs.error_code == "0" and rs.next():
+                rows.append(rs.get_row_data())
+            return rows
+        return []
+
+
+def _bs_date_window(
+    period: str,
+    limit: int,
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> tuple[str, str]:
+    """把 limit 换算成 baostock 需要的 [start_date, end_date] 闭区间。
+
+    baostock 没有「取最近 N 根」的参数，只能给日期区间；这里按每根K线占用的
+    日历天数反推起点，宁可多取（后面 tail(limit) 截断），也不要取不够。
+    """
+    end = end_date or datetime.now().strftime("%Y-%m-%d")
+    if start_date:
+        return start_date, end
+    span_days = int(limit * _BS_DAYS_PER_BAR.get(period, 2.0)) + 30
+    start = (datetime.now() - timedelta(days=span_days)).strftime("%Y-%m-%d")
+    if start < _BS_EARLIEST:
+        start = _BS_EARLIEST
+    return start, end
+
+
+def _get_kline_baostock(
+    sym: str,
+    mkt: str,
+    period: str,
+    adjust: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    limit: int,
+) -> pd.DataFrame:
+    """用 baostock 取 A 股日/周/月/分钟 K 线，输出口径与旧腾讯实现保持一致。
+
+    Args:
+        sym: 6 位代码，如 "000001"。
+        mkt: 市场前缀 sh / sz。
+        period: daily / weekly / monthly / 5 / 15 / 30 / 60，未知值按 daily 处理。
+        adjust: qfq / hfq / 其它（不复权）。
+        start_date: 起始日期 YYYY-MM-DD，None 时由 limit 反推。
+        end_date: 结束日期 YYYY-MM-DD，None 时取今天。
+        limit: 最多保留根数。
+
+    Returns:
+        DataFrame[date, open, close, high, low, volume]，date 为 datetime64 且升序；
+        无数据 / 不支持的市场 / 取数失败时返回空 DataFrame（不抛异常）。
+
+    Note:
+        - baostock 只覆盖沪深两市，北交所（bj）与未知市场直接返回空。
+        - 日线才有 tradestatus 字段，周/月/分钟传了会报「指标参数传入错误」，
+          因此 fields 按频率分别拼。
+        - 停牌日 volume 为空串且 tradestatus='0'，这类行直接跳过，
+          与腾讯口径（不含停牌日）保持一致。
+    """
+    if bs is None:
+        log.error("[baostock] 未安装，返回空 DataFrame")
+        return pd.DataFrame()
+    if mkt not in ("sh", "sz"):
+        log.warning(f"[baostock] 不支持的市场 {mkt}.{sym}（仅支持 sh/sz）")
+        return pd.DataFrame()
+
+    is_minute = period in _MINUTE_PERIODS
+    freq = _BS_FREQ.get(period, "d")
+    adjustflag = _BS_ADJUSTFLAG.get(adjust, "3")
+    start, end = _bs_date_window(period, limit, start_date, end_date)
+    bs_code = f"{mkt}.{sym}"
+
+    if is_minute:
+        fields = "date,time,open,high,low,close,volume"
+    elif freq == "d":
+        fields = "date,open,high,low,close,volume,tradestatus"
+    else:
+        fields = "date,open,high,low,close,volume"
+
+    rows = _bs_query(bs_code, fields, start, end, freq, adjustflag)
+    if not rows:
+        return pd.DataFrame()
+
+    records = []
+    for row in rows:
+        try:
+            if is_minute:
+                # 分钟行：[date, time, open, high, low, close, volume]
+                # time 形如 20261015150000000（YYYYMMDDHHMMSSsss），截到秒即为该K线时间
+                _, t, o, h, l, c, v = row
+                date_str = f"{t[:4]}-{t[4:6]}-{t[6:8]} {t[8:10]}:{t[10:12]}:{t[12:14]}"
+            elif freq == "d":
+                # 日线行：[date, open, high, low, close, volume, tradestatus]
+                d, o, h, l, c, v, tradestatus = row
+                if tradestatus == "0" or v == "":
+                    continue  # 停牌日
+                date_str = d
+            else:
+                # 周/月行：[date, open, high, low, close, volume]
+                d, o, h, l, c, v = row
+                date_str = d
+            if "" in (o, h, l, c, v):
+                continue  # 字段缺失（新股未上市 / 数据源空值）
+            vol = float(v)
+        except (ValueError, TypeError):
+            continue
+        records.append({
+            "date": date_str,
+            "open": float(o),
+            "close": float(c),
+            "high": float(h),
+            "low": float(l),
+            # 股 → 手 取整（腾讯口径就是 round(股/100)，实测可逐日对上）；
+            # 转 float 是为了与旧实现保持同样的 float64 列类型
+            "volume": float(round(vol / 100.0)) if _BS_VOLUME_TO_LOTS else vol,
+        })
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+    df["date"] = pd.to_datetime(df["date"])
+    if len(df) > limit:
+        df = df.tail(limit).reset_index(drop=True)
+    return df
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 旧实现（日/周/月走腾讯 HTTP，分钟走新浪）已停用，整段注释保留供对照。
+# 新实现见下方 get_kline_hist（baostock）。
+# ════════════════════════════════════════════════════════════════════════════
+# def get_kline_hist(
+#     code: str,
+#     period: str = "daily",
+#     start_date: Optional[str] = None,
+#     end_date: Optional[str] = None,
+#     adjust: str = "qfq",
+#     limit: int = 500,
+# ) -> pd.DataFrame:
+#     """
+#     获取历史K线数据
+#     period: daily/weekly/monthly/5/15/30/60 分钟
+#     adjust: qfq=前复权 hfq=后复权 None=不复权
+#     limit: 最多返回根数（与缠论/图表窗口对齐，纳入缓存键）
+#     """
+#     limit = max(20, min(int(limit), 2000))
+#     cache_key = f"kline:{code}:{period}:{adjust}:{limit}"
+#     cached = _cache_get(cache_key)
+#     if cached is not None:
+#         return cached
+#
+#     sym, _ = normalize_stock_code(code)
+#     mkt = _get_qq_market_code(code)
+#
+#     # 分钟数据使用新浪API
+#     minute_periods = ["5", "15", "30", "60"]
+#     if period in minute_periods:
+#         df = _get_minute_data_sina(sym, mkt, period, adjust)
+#         if not df.empty:
+#             _cache_set(cache_key, df, ttl=60)  # 分钟数据缓存60秒
+#         return df
+#
+#     # 日/周/月数据使用腾讯API
+#     period_map = {
+#         "daily": "day",
+#         "weekly": "week",
+#         "monthly": "month",
+#     }
+#     period_qq = period_map.get(period, "day")
+#
+#     # 复权处理
+#     if adjust == "qfq":
+#         adjust_suffix = "qfq"
+#     elif adjust == "hfq":
+#         adjust_suffix = "hfq"
+#     else:
+#         adjust_suffix = ""
+#
+#     # 默认获取 limit 条数据（腾讯 API 单次上限约 2000）
+#     fetch_limit = limit
+#
+#     try:
+#         url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?_var=kline_{period_qq}{adjust_suffix}&param={mkt}{sym},{period_qq},,,{fetch_limit},{adjust_suffix}"
+#         client = _get_client()
+#         resp = client.get(url)
+#         text = resp.text
+#
+#         # 解析返回数据: kline_dayqfq={...}
+#         json_match = re.search(r'=({.+})', text)
+#         if not json_match:
+#             return pd.DataFrame()
+#
+#         data = json.loads(json_match.group(1))
+#         key = f"{mkt}{sym}"
+#
+#         if key not in data.get("data", {}):
+#             return pd.DataFrame()
+#
+#         # 获取数据 - 注意腾讯API返回的key格式可能是 "qfqweek" 而不是 "weekqfq"
+#         data_key = f"{period_qq}{adjust_suffix}" if adjust_suffix else period_qq
+#         klines = data["data"][key].get(data_key, [])
+#
+#         if not klines:
+#             # 尝试其他可能的key格式
+#             for k in [f"qfq{period_qq}", f"{period_qq}qfq", period_qq, "day", "qfqday", "hfqday", "dayhfq"]:
+#                 if k in data["data"][key]:
+#                     klines = data["data"][key][k]
+#                     break
+#
+#         if not klines:
+#             return pd.DataFrame()
+#
+#         records = []
+#         for kl in klines:
+#             if len(kl) >= 6:
+#                 try:
+#                     records.append({
+#                         "date": kl[0],
+#                         "open": float(kl[1]),
+#                         "close": float(kl[2]),
+#                         "high": float(kl[3]),
+#                         "low": float(kl[4]),
+#                         "volume": float(kl[5]),
+#                     })
+#                 except (ValueError, IndexError):
+#                     continue
+#
+#         df = pd.DataFrame(records)
+#         if not df.empty:
+#             df['date'] = pd.to_datetime(df['date'])
+#             if len(df) > limit:
+#                 df = df.tail(limit).reset_index(drop=True)
+#             # 分钟数据缓存 30 秒（盘中波动大）；日线缓存 5 分钟
+#             _cache_set(cache_key, df, ttl=30 if period in minute_periods else 300)
+#         return df
+#     except Exception as e:
+#         log.warning(f"K线获取失败 {code} {period}: {e}")
+#         return pd.DataFrame()
+
+
 def get_kline_hist(
     code: str,
     period: str = "daily",
@@ -306,104 +631,50 @@ def get_kline_hist(
     limit: int = 500,
 ) -> pd.DataFrame:
     """
-    获取历史K线数据
+    获取历史K线数据（数据源：baostock）
+
     period: daily/weekly/monthly/5/15/30/60 分钟
     adjust: qfq=前复权 hfq=后复权 None=不复权
     limit: 最多返回根数（与缠论/图表窗口对齐，纳入缓存键）
+    start_date / end_date: YYYY-MM-DD 闭区间，None 时由 limit 反推起点、终点取今天
+
+    Returns:
+        DataFrame[date, open, close, high, low, volume]，date 为 datetime64、
+        按时间升序、索引从 0 连续；无数据或取数失败返回空 DataFrame（不抛异常）。
+
+    Note:
+        - volume 换算成「手」（baostock 原始单位是股），与 get_realtime_quote 等
+          腾讯口径保持一致；要原始股数把 _BS_VOLUME_TO_LOTS 置为 False。
+        - baostock 只覆盖沪深两市，北交所代码返回空 DataFrame。
+        - 分钟线在 baostock 覆盖不到时自动退回新浪接口。
+        - 日线截止到最近一个已收盘交易日，盘中拿不到当日未收盘K线。
     """
     limit = max(20, min(int(limit), 2000))
     cache_key = f"kline:{code}:{period}:{adjust}:{limit}"
+    # 只有真的传了日期才并入缓存键，保持默认调用时的键与旧实现一致
+    if start_date or end_date:
+        cache_key += f":{start_date}:{end_date}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
 
     sym, _ = normalize_stock_code(code)
     mkt = _get_qq_market_code(code)
+    is_minute = period in _MINUTE_PERIODS
 
-    # 分钟数据使用新浪API
-    minute_periods = ["5", "15", "30", "60"]
-    if period in minute_periods:
+    df = _get_kline_baostock(sym, mkt, period, adjust, start_date, end_date, limit)
+
+    # 分钟线：baostock 的历史区间有限（约 2020 年至今），取不到时退回新浪
+    if is_minute and df.empty:
         df = _get_minute_data_sina(sym, mkt, period, adjust)
         if not df.empty:
             _cache_set(cache_key, df, ttl=60)  # 分钟数据缓存60秒
         return df
 
-    # 日/周/月数据使用腾讯API
-    period_map = {
-        "daily": "day",
-        "weekly": "week",
-        "monthly": "month",
-    }
-    period_qq = period_map.get(period, "day")
-
-    # 复权处理
-    if adjust == "qfq":
-        adjust_suffix = "qfq"
-    elif adjust == "hfq":
-        adjust_suffix = "hfq"
-    else:
-        adjust_suffix = ""
-
-    # 默认获取 limit 条数据（腾讯 API 单次上限约 2000）
-    fetch_limit = limit
-
-    try:
-        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?_var=kline_{period_qq}{adjust_suffix}&param={mkt}{sym},{period_qq},,,{fetch_limit},{adjust_suffix}"
-        client = _get_client()
-        resp = client.get(url)
-        text = resp.text
-
-        # 解析返回数据: kline_dayqfq={...}
-        json_match = re.search(r'=({.+})', text)
-        if not json_match:
-            return pd.DataFrame()
-
-        data = json.loads(json_match.group(1))
-        key = f"{mkt}{sym}"
-
-        if key not in data.get("data", {}):
-            return pd.DataFrame()
-
-        # 获取数据 - 注意腾讯API返回的key格式可能是 "qfqweek" 而不是 "weekqfq"
-        data_key = f"{period_qq}{adjust_suffix}" if adjust_suffix else period_qq
-        klines = data["data"][key].get(data_key, [])
-
-        if not klines:
-            # 尝试其他可能的key格式
-            for k in [f"qfq{period_qq}", f"{period_qq}qfq", period_qq, "day", "qfqday", "hfqday", "dayhfq"]:
-                if k in data["data"][key]:
-                    klines = data["data"][key][k]
-                    break
-
-        if not klines:
-            return pd.DataFrame()
-
-        records = []
-        for kl in klines:
-            if len(kl) >= 6:
-                try:
-                    records.append({
-                        "date": kl[0],
-                        "open": float(kl[1]),
-                        "close": float(kl[2]),
-                        "high": float(kl[3]),
-                        "low": float(kl[4]),
-                        "volume": float(kl[5]),
-                    })
-                except (ValueError, IndexError):
-                    continue
-
-        df = pd.DataFrame(records)
-        if not df.empty:
-            df['date'] = pd.to_datetime(df['date'])
-            if len(df) > limit:
-                df = df.tail(limit).reset_index(drop=True)
-            # 分钟数据缓存 30 秒（盘中波动大）；日线缓存 5 分钟
-            _cache_set(cache_key, df, ttl=30 if period in minute_periods else 300)
-        return df
-    except Exception as e:
-        log.warning(f"K线获取失败 {code} {period}: {e}")
-        return pd.DataFrame()
+    if not df.empty:
+        # 分钟数据缓存 30 秒（盘中波动大）；日线及以上缓存 5 分钟
+        _cache_set(cache_key, df, ttl=30 if is_minute else 300)
+    return df
 
 
 def get_index_quote(index_code: str = "000001") -> dict:

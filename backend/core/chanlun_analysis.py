@@ -70,7 +70,7 @@ def level_to_period(level: str) -> str:
     return mapping.get(level, "daily")
 
 
-def run_analysis(code: str, level: str, kline_limit: int = DEFAULT_KLINE_LIMIT) -> ChanlunAnalysis:
+def run_analysis(code: str, level: str, start_date: str, kline_limit: int = DEFAULT_KLINE_LIMIT) -> ChanlunAnalysis:
     """执行一次缠论分析（带缓存），是 A 股缠论链路唯一的取数入口。
 
     流程：查缓存 → 拉 K 线 → 20 根门槛 → 截断到窗口 → 跑引擎 →
@@ -95,7 +95,7 @@ def run_analysis(code: str, level: str, kline_limit: int = DEFAULT_KLINE_LIMIT) 
 
     # 同步阻塞调用（网络 + CPU），由上层用 asyncio.to_thread 丢线程池
     period = level_to_period(level)
-    df = get_kline_hist(code, period=period, start_date=None, adjust="qfq", limit=kline_limit)
+    df = get_kline_hist(code, period=period, start_date=start_date, adjust="qfq", limit=kline_limit)
 
     # 20 根是「能画出一笔」的经验下限，不足时直接 404，不返回空壳结果误导前端
     if df.empty or len(df) < 20:
