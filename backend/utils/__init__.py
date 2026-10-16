@@ -1,5 +1,12 @@
 """
-轻量级工具集合：LRU 缓存（带 TTL）、HTTP 重试装饰器、请求限流
+轻量级工具集合：LRU 缓存（带 TTL）、HTTP 重试装饰器、请求限流。
+
+除级的纯函数助手按模块单独提供，调用方直接按路径导入：
+
+    - ``utils.datetime_fmt``：日期归一化 / 短日期格式化
+    - ``utils.indicators``：共享技术指标（MACD / SKDJ / 双金叉）
+    - ``utils.numbers``：脏值 → JSON 合法有限浮点数
+    - ``utils.stock_code``：股票代码归一化（本包已重导出，见 __all__）
 """
 import time
 import threading
@@ -9,6 +16,26 @@ import httpx
 from collections import OrderedDict
 from typing import Any, Callable, Optional
 import hashlib
+
+# 股票代码归一化（裸 6 位 / sz.002384 / 002384.SZ …… → baostock 格式）
+from .stock_code import (
+    MARKETS,
+    detect_market,
+    is_valid_symbol,
+    split_code,
+    to_baostock_code,
+)
+
+__all__ = [
+    "LRUCache",
+    "with_retry",
+    "RateLimiter",
+    "MARKETS",
+    "detect_market",
+    "is_valid_symbol",
+    "split_code",
+    "to_baostock_code",
+]
 
 
 class LRUCache:

@@ -62,12 +62,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(stocks.router)
+# app.include_router(stocks.router)
 app.include_router(chanlun_routes.router)
 app.include_router(watchlist.router)
 app.include_router(comments.router)
 app.include_router(system.router)
-app.include_router(diagnosis.router)
+# app.include_router(diagnosis.router)
 
 
 if __name__ == "__main__":

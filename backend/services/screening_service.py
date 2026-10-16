@@ -1,24 +1,207 @@
 """
 选股服务 — 按基础指标、缠论买卖点、MACD+SKDJ 双金叉筛选股票。
+
+缠论部分基于 newchan，但没有直接 ``new CChan(code, ..., DATA_SRC.BAO_STOCK)``，
+而是拆成「取数」与「计算」两步：K 线仍走 services.akshare_service.get_kline_hist
+（它内部用 _bs_lock 串行化 baostock 单一会话，可在线程池里安全并发调用），
+拿到 DataFrame 后再用 newchan 的 CKLine_List 增量推进算出笔 / 线段 / 中枢 / 买卖点
+（纯 CPU，不受取数锁影响，因此ThreadPoolExecutor 的并行度仍然有效）。
+
+不直接构造 CChan 的原因有两个：
+    1. CBaoStock.do_init / do_close 用的是**类属性** is_connect + 全局 bs.login/logout，
+       在线程池里并发会互相踢下线；
+    2. CBaoStock.do_close 里的 bs.logout() 会把 akshare_service 已经建好的会话一起注销，
+       （它用模块级 _bs_logged_in 记账），反过来让后续 get_kline_hist 取到空数据。
 """
 import logging
 import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
-from chanlun.elements import BuySellPoint
-from core.chanlun_analysis import SCREENING_KLINE_LIMIT, run_analysis
-from core.kline_serialize import analysis_klines_to_df
+from newchan.BuySellPoint.BS_Point import CBS_Point
+from newchan.ChanConfig import CChanConfig
+from newchan.Common.CEnum import DATA_FIELD, KL_TYPE
+from newchan.Common.CTime import CTime
+from newchan.KLine.KLine_List import CKLine_List
+from newchan.KLine.KLine_Unit import CKLine_Unit
 from services.akshare_service import (
     get_daily_hot_stocks,
+    get_kline_hist,
     get_realtime_quote,
     get_stock_boards_em,
     get_stock_info,
 )
+from ai.wave_classifier import WaveClassifier
 from config import SCREENING_WORKERS
-from core.indicators import calc_macd_lists, calc_skdj_lists, find_latest_dual_cross_bar
+from utils.indicators import calc_macd_lists, calc_skdj_lists, find_latest_dual_cross_bar
 
 log = logging.getLogger(__name__)
+
+# 选股场景的窗口：判断买卖点只需近期结构，200 根足够且能大幅降低数据源压力。
+# 原名 core.chanlun_analysis.SCREENING_KLINE_LIMIT，随 core 包弃用搬到这里。
+SCREENING_KLINE_LIMIT = 200
+# 「能画出一笔」的经验下限，不足时跳过而不是返回空壳结果
+MIN_KLINE_NUM = 20
+
+# 前端级别名 → akshare period 参数。
+# 注意 "1min" 折到 "5"：akshare_service 的 _MINUTE_PERIODS 只有 5/15/30/60，
+# 不支持 1 分钟线，这里沿用旧 core.level_to_period 的行为而非报错。
+_LEVEL_TO_PERIOD = {
+    "1min": "5",
+    "5min": "5",
+    "15min": "15",
+    "30min": "30",
+    "60min": "60",
+    "daily": "daily",
+    "weekly": "weekly",
+    "monthly": "monthly",
+}
+
+# 前端级别名 → newchan 的 KL_TYPE，用于构造 CKLine_List 时标明本序列的级别语义。
+# 注意 "1min" 同样落到 K_5M：它实际取到的就是 5 分钟K线（见 _LEVEL_TO_PERIOD 的注），
+# 这里按「数据的真实周期」标注而不是按请求的级别名，否则分钟线的时间序列会被标错。
+_LEVEL_TO_KLTYPE = {
+    "1min": KL_TYPE.K_5M,
+    "5min": KL_TYPE.K_5M,
+    "15min": KL_TYPE.K_15M,
+    "30min": KL_TYPE.K_30M,
+    "60min": KL_TYPE.K_60M,
+    "daily": KL_TYPE.K_DAY,
+    "weekly": KL_TYPE.K_WEEK,
+    "monthly": KL_TYPE.K_MON,
+}
+
+# CBS_Point 不带置信度（features 里只有结构量），给所有买卖点一个中性基准。
+# 与 ai.strategy_engine.DEFAULT_BSP_CONFIDENCE 同口径。
+DEFAULT_BSP_CONFIDENCE = 0.6
+_CN_NUM = {"1": "一", "2": "二", "3": "三"}
+
+
+def _level_to_period(level: str) -> str:
+    """前端级别名 → akshare period；未知级别兜底 daily，宁可算日线也不传非法参数。"""
+    return _LEVEL_TO_PERIOD.get(level, "daily")
+
+
+def _level_to_kltype(level: str) -> KL_TYPE:
+    """前端级别名 → newchan KL_TYPE；未知级别兜底日线，规则同 _level_to_period。"""
+    return _LEVEL_TO_KLTYPE.get(level, KL_TYPE.K_DAY)
+
+
+def _to_ctime(ts) -> CTime:
+    """
+    pandas 时间戳 → newchan 的 CTime。
+
+    Note:
+        关键在 hour/minute 的取值：CTime 的 auto 语义是「时分都为 0 时视为天级别，
+        落到当天 23:59」，正好让日线时间戳大于当天任意分钟K线。分钟线的 date
+        带真实时分，原样传进去即可，不要统一填 0 —— 否则会被误判成天级别。
+    """
+    return CTime(ts.year, ts.month, ts.day, ts.hour, ts.minute)
+
+
+def _build_kl_list(df: pd.DataFrame, kl_type: KL_TYPE) -> CKLine_List:
+    """
+    把 K 线 DataFrame 喂给 newchan，算出该级别的笔 / 线段 / 中枢 / 买卖点。
+
+    Args:
+        df: 至少含 date/open/close/high/low 列、按时间升序的 K 线表。
+        kl_type: 本序列级别，决定 CTime 与笔解释器如何理解时间。
+
+    Returns:
+        CKLine_List: 已结算完成的容器（bi_list / seg_list / zs_list / bs_point_lst 均可用）。
+
+    Note:
+        刻意绕过 CChan 的联网取数，改用 add_single_klu 手工推进：网络 I/O 在此之前
+        已由 _analyze_stock 做完（且被 akshare_service._bs_lock 保护），剩下的纯
+        CPU 计算才能在线程池里真正并行。
+        autofix=True 是因为数据源偶有畸形K线（open < low 之类），不修正会抛
+        ErrCode.KL_DATA_INVALID。
+    """
+    for col in ("date", "open", "close", "high", "low"):
+        if col not in df.columns:
+            raise ValueError(f"K线表缺少 {col} 列，实际列={list(df.columns)}")
+
+    kl_list = CKLine_List(kl_type=kl_type, conf=CChanConfig({}))
+    dates = df["date"].tolist()
+    opens = df["open"].astype(float).tolist()
+    closes = df["close"].astype(float).tolist()
+    highs = df["high"].astype(float).tolist()
+    lows = df["low"].astype(float).tolist()
+
+    for i in range(len(dates)):
+        klu = CKLine_Unit(
+            {
+                DATA_FIELD.FIELD_TIME: _to_ctime(dates[i]),
+                DATA_FIELD.FIELD_OPEN: opens[i],
+                DATA_FIELD.FIELD_CLOSE: closes[i],
+                DATA_FIELD.FIELD_HIGH: highs[i],
+                DATA_FIELD.FIELD_LOW: lows[i],
+            },
+            autofix=True,
+        )
+        # idx / kl_type 原本由 CChan.load 统一回填，手工推进必须自己补上，
+        # 否则买卖点比较先后时会拿到哨兵值 -1
+        klu.set_idx(i)
+        klu.kl_type = kl_type
+        kl_list.add_single_klu(klu)
+
+    # 全部K线喂完后统一结算：线段 / 中枢 / 买卖点是批量算的（只有笔是增量更新）
+    kl_list.cal_seg_and_zs()
+    return kl_list
+
+
+def _latest_bsp(kl_list: CKLine_List) -> CBS_Point | None:
+    """
+    取该级别最新一个买卖点。
+
+    Note:
+        bsp_iter_v2 是按笔 idx「从新到旧」归并遍历的生成器，取第一个即可，
+        没必要把全部买卖点排一遍序（选股场景只要最近的那个）。
+    """
+    try:
+        return next(iter(kl_list.bs_point_lst.bsp_iter_v2()), None)
+    except Exception:
+        return None
+
+
+def _bsp_labels(bsp: CBS_Point) -> list[str]:
+    """
+    CBS_Point 的类型列表 → 中文标签，如 ``["一买"]`` / ``["二买", "三买"]``。
+
+    Note:
+        CBS_Point.type 是列表而非单值 —— 同一根笔可同时满足多类定义，
+        所以返回列表，由调用方决定取哪个。
+    """
+    sfx = "买" if bsp.is_buy else "卖"
+    labels: list[str] = []
+    for t in bsp.type:
+        main = str(t.main_type())
+        label = f"{_CN_NUM.get(main, main)}{sfx}"
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _bsp_date_str(bsp: CBS_Point) -> str:
+    """买卖点日期 → 'YYYY-MM-DD'。
+
+    Note:
+        CBS_Point 没有 datetime 属性，时间挂在它所在的那根 KLU 上。
+        CTime.__str__ 输出的是 'YYYY/MM/DD'（斜杠），这里统一转成 ISO 短横线格式，
+        与旧 BuySellPoint.datetime 的输出口径保持一致。
+    """
+    return bsp.klu.time.toDateStr(splt="-")
+
+
+def _bsp_confidence(bsp: CBS_Point) -> float:
+    """买卖点置信度：features 里有 'confidence' 就用，否则回落默认基准。"""
+    try:
+        v = bsp.features["confidence"]
+    except (KeyError, TypeError, AttributeError):
+        v = None
+    if v is None:
+        return DEFAULT_BSP_CONFIDENCE
+    return max(0.0, min(1.0, float(v)))
 
 
 def _dual_cross_info(klines_df: pd.DataFrame):
@@ -48,21 +231,38 @@ def _analyze_stock(code: str, level: str) -> dict | None:
     返回字典或 None（分析失败时跳过）。
     """
     try:
-        result = run_analysis(code, level, kline_limit=SCREENING_KLINE_LIMIT)
-        df = analysis_klines_to_df(result.klines)
-        if df.empty or len(df) < 20:
+        # 取数沿用原来的 akshare（内部已用 _bs_lock 串行化 baostock 会话，可并发调用）；
+        # 不用 CChan(DATA_SRC.BAO_STOCK)，见本模块文件头注释
+        df = get_kline_hist(
+            code,
+            period=_level_to_period(level),
+            start_date=None,
+            adjust="qfq",
+            limit=SCREENING_KLINE_LIMIT,
+        )
+        if df.empty or len(df) < MIN_KLINE_NUM:
             return None
 
-        latest_signal: BuySellPoint | None = None
-        if result.signals:
-            sorted_sigs = sorted(result.signals, key=lambda s: s.datetime, reverse=True)
-            latest_signal = sorted_sigs[0]
+        kl_list = _build_kl_list(df, _level_to_kltype(level))
+
+        latest_signal: CBS_Point | None = _latest_bsp(kl_list)
+
+        # 走势分类交给现成的 WaveClassifier：线段列表配线段中枢（同级配对）
+        try:
+            segs = list(kl_list.seg_list)
+            seg_zss = list(kl_list.segzs_list)
+            trend = WaveClassifier().classify(
+                segs, seg_zss, float(df["close"].iloc[-1])
+            )["trend"]
+        except Exception:
+            log.debug("走势分类失败 code=%s level=%s", code, level, exc_info=True)
+            trend = "未知"
 
         has_dual_cross, dual_cross_date = _dual_cross_info(df)
 
         return {
             "code": code,
-            "trend": result.trend,
+            "trend": trend,
             "latest_signal": latest_signal,
             "has_dual_cross": has_dual_cross,
             "dual_cross_date": dual_cross_date,
@@ -339,7 +539,9 @@ def screen_stocks_stream(
             if signal_types:
                 if analysis["latest_signal"] is None:
                     continue
-                if analysis["latest_signal"].type not in signal_types:
+                # CBS_Point.type 是多值列表（一根笔可同时是多类买卖点），
+                # 命中任意一个就算通过
+                if not set(_bsp_labels(analysis["latest_signal"])) & set(signal_types):
                     continue
 
             has_dual_cross = analysis["has_dual_cross"]
@@ -352,8 +554,8 @@ def screen_stocks_stream(
             sig_date_str = None
             sig_conf = None
             if sig is not None:
-                sig_date_str = str(sig.datetime)[:10]
-                sig_conf = round(sig.confidence, 2)
+                sig_date_str = _bsp_date_str(sig)
+                sig_conf = round(_bsp_confidence(sig), 2)
 
             emitted_count += 1
             yield {
@@ -368,7 +570,7 @@ def screen_stocks_stream(
                     "industry": q.get("industry"),
                     "pe": q.get("pe"),
                     "pb": q.get("pb"),
-                    "latest_signal": sig.type if sig else None,
+                    "latest_signal": (_bsp_labels(sig)[0] if sig else None),
                     "latest_signal_date": sig_date_str,
                     "latest_signal_conf": sig_conf,
                     "has_dual_cross": has_dual_cross,

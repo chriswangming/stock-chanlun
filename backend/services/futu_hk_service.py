@@ -372,7 +372,7 @@ def is_hk_index(code: str) -> bool:
 
 
 # 项目内部周期串 -> futu KLType 属性名
-# 覆盖 core.chanlun_analysis.level_to_period 的产物（1min->"5", 15min->"15", daily...）
+# 覆盖原 level_to_period 的产物（1min->"5", 15min->"15", daily...）
 # 以及 "5min"/"weekly" 这类通用周期串写法
 _PERIOD_TO_KL = {
     "1min": "K_1M", "1": "K_1M",

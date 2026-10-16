@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 
 from utils import with_retry
+from utils.stock_code import detect_market, split_code
 
 log = logging.getLogger(__name__)
 
@@ -206,29 +207,29 @@ def _cache_set(key: str, data, ttl: int = 60):
 
 
 def normalize_stock_code(code: str) -> tuple[str, str]:
-    """规范化股票代码，返回 (market_code, exchange)
-       sz=深圳, sh=上海
+    """规范化股票代码，返回 (纯6位代码, 市场标识)。
+
+    Args:
+        code: 任意常见写法 —— ``"002384"`` / ``"2384"`` / ``"sz.002384"``
+            / ``"sz002384"`` / ``"002384.SZ"``
+
+    Returns:
+        Tuple[str, str]: ``(symbol, market)``，market ∈ ``{"sh","sz","bj"}``。
+
+    Note:
+        关键是**先剥掉已有的市场标识**再判定：老实现直接对整串做
+        ``startswith``，于是 ``"sz.000001"`` 三个分支都不命中、落到默认 ``sz``，
+        但 symbol 仍是带前缀的 ``"sz.000001"`` —— 下游拼 ``f"{mkt}.{sym}"`` 就
+        变成 ``"sz.sz.000001"``，baostock 报「股票代码应为9位」。
+        现在统一走 ``utils.stock_code``，两种写法都能得到 ``("000001", "sz")``。
     """
-    code = code.strip().zfill(6)
-    if code.startswith(('00', '30', '002', '003')):
-        return code, "sz"
-    elif code.startswith(('60', '68', '500', '501')):
-        return code, "sh"
-    elif code.startswith('8') or code.startswith('4'):
-        return code, "bj"
-    return code, "sz"
+    symbol, market = split_code(code)
+    return symbol, (market or detect_market(symbol))
 
 
 def _get_qq_market_code(code: str) -> str:
-    """获取腾讯API的市场前缀"""
-    code = code.strip().zfill(6)
-    if code.startswith(('00', '30', '002', '003')):
-        return "sz"  # 深圳
-    elif code.startswith(('60', '68', '500', '501')):
-        return "sh"  # 上海
-    elif code.startswith('8') or code.startswith('4'):
-        return "bj"  # 北交所
-    return "sz"
+    """获取腾讯API的市场前缀（与 normalize_stock_code 同一套判定规则）"""
+    return normalize_stock_code(code)[1]
 
 
 def get_realtime_quote(codes: list[str]) -> pd.DataFrame:
@@ -507,120 +508,6 @@ def _get_kline_baostock(
     if len(df) > limit:
         df = df.tail(limit).reset_index(drop=True)
     return df
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 旧实现（日/周/月走腾讯 HTTP，分钟走新浪）已停用，整段注释保留供对照。
-# 新实现见下方 get_kline_hist（baostock）。
-# ════════════════════════════════════════════════════════════════════════════
-# def get_kline_hist(
-#     code: str,
-#     period: str = "daily",
-#     start_date: Optional[str] = None,
-#     end_date: Optional[str] = None,
-#     adjust: str = "qfq",
-#     limit: int = 500,
-# ) -> pd.DataFrame:
-#     """
-#     获取历史K线数据
-#     period: daily/weekly/monthly/5/15/30/60 分钟
-#     adjust: qfq=前复权 hfq=后复权 None=不复权
-#     limit: 最多返回根数（与缠论/图表窗口对齐，纳入缓存键）
-#     """
-#     limit = max(20, min(int(limit), 2000))
-#     cache_key = f"kline:{code}:{period}:{adjust}:{limit}"
-#     cached = _cache_get(cache_key)
-#     if cached is not None:
-#         return cached
-#
-#     sym, _ = normalize_stock_code(code)
-#     mkt = _get_qq_market_code(code)
-#
-#     # 分钟数据使用新浪API
-#     minute_periods = ["5", "15", "30", "60"]
-#     if period in minute_periods:
-#         df = _get_minute_data_sina(sym, mkt, period, adjust)
-#         if not df.empty:
-#             _cache_set(cache_key, df, ttl=60)  # 分钟数据缓存60秒
-#         return df
-#
-#     # 日/周/月数据使用腾讯API
-#     period_map = {
-#         "daily": "day",
-#         "weekly": "week",
-#         "monthly": "month",
-#     }
-#     period_qq = period_map.get(period, "day")
-#
-#     # 复权处理
-#     if adjust == "qfq":
-#         adjust_suffix = "qfq"
-#     elif adjust == "hfq":
-#         adjust_suffix = "hfq"
-#     else:
-#         adjust_suffix = ""
-#
-#     # 默认获取 limit 条数据（腾讯 API 单次上限约 2000）
-#     fetch_limit = limit
-#
-#     try:
-#         url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?_var=kline_{period_qq}{adjust_suffix}&param={mkt}{sym},{period_qq},,,{fetch_limit},{adjust_suffix}"
-#         client = _get_client()
-#         resp = client.get(url)
-#         text = resp.text
-#
-#         # 解析返回数据: kline_dayqfq={...}
-#         json_match = re.search(r'=({.+})', text)
-#         if not json_match:
-#             return pd.DataFrame()
-#
-#         data = json.loads(json_match.group(1))
-#         key = f"{mkt}{sym}"
-#
-#         if key not in data.get("data", {}):
-#             return pd.DataFrame()
-#
-#         # 获取数据 - 注意腾讯API返回的key格式可能是 "qfqweek" 而不是 "weekqfq"
-#         data_key = f"{period_qq}{adjust_suffix}" if adjust_suffix else period_qq
-#         klines = data["data"][key].get(data_key, [])
-#
-#         if not klines:
-#             # 尝试其他可能的key格式
-#             for k in [f"qfq{period_qq}", f"{period_qq}qfq", period_qq, "day", "qfqday", "hfqday", "dayhfq"]:
-#                 if k in data["data"][key]:
-#                     klines = data["data"][key][k]
-#                     break
-#
-#         if not klines:
-#             return pd.DataFrame()
-#
-#         records = []
-#         for kl in klines:
-#             if len(kl) >= 6:
-#                 try:
-#                     records.append({
-#                         "date": kl[0],
-#                         "open": float(kl[1]),
-#                         "close": float(kl[2]),
-#                         "high": float(kl[3]),
-#                         "low": float(kl[4]),
-#                         "volume": float(kl[5]),
-#                     })
-#                 except (ValueError, IndexError):
-#                     continue
-#
-#         df = pd.DataFrame(records)
-#         if not df.empty:
-#             df['date'] = pd.to_datetime(df['date'])
-#             if len(df) > limit:
-#                 df = df.tail(limit).reset_index(drop=True)
-#             # 分钟数据缓存 30 秒（盘中波动大）；日线缓存 5 分钟
-#             _cache_set(cache_key, df, ttl=30 if period in minute_periods else 300)
-#         return df
-#     except Exception as e:
-#         log.warning(f"K线获取失败 {code} {period}: {e}")
-#         return pd.DataFrame()
-
 
 def get_kline_hist(
     code: str,
