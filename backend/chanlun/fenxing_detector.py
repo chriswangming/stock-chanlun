@@ -38,37 +38,7 @@ from typing import Literal
 
 import numpy as np
 
-from .elements import KLine, MergedKLine, IncludedRaw
-
-
-@dataclass
-class Fenxing:
-    """
-    一个顶分型或底分型（三根相邻**合并K线**构成的价格转折点）。
-
-    Attributes:
-        date: 中间那根合并K线的``start``日期，即这段合并区间的起始日，
-            用于与原始K线对齐。注意它不是「中间那根原始K线」的日期。
-        type: "top"=顶分型（阶段高点），"bottom"=底分型（阶段低点）。
-        high / low: 中间那根合并K线的高低点——判定分型时就是拿它跟
-            左右两根比（见 :meth:`FenxingDetector.detect`）。
-        index: 该分型在**合并后序列**中的下标。
-
-    Note:
-        ``index`` 是**包含合并后序列**中的下标，**不是**原始K线的位置。
-        合并会让序列变短，因此不能用它在原始K线列表里直接取元素。
-    """
-    # 分型中间那根合并K线的起始日期（用于与原始K线对齐）
-    date: datetime
-    # 分型类型："top"=顶分型，"bottom"=底分型
-    type: Literal["top", "bottom"]
-    # 分型中间合并K线的最高价
-    high: float
-    # 分型中间合并K线的最低价
-    low: float
-    # 该分型在**合并后序列**中的下标（易踩坑，见类文档 Note）
-    index: int
-
+from .elements import KLine, MergedKLine, IncludedRaw, Fenxing
 
 class FenxingDetector:
     """
@@ -113,6 +83,7 @@ class FenxingDetector:
         self.raw_klines: list[KLine] = list(klines)
         self.merged_klines: list[MergedKLine] = []
         self._process_inclusion()
+        self.fenxings: list[Fenxing] = []
 
     def _process_inclusion(self):
         """
@@ -366,4 +337,5 @@ class FenxingDetector:
 
         # 顶、底是分开扫描的两轮，需按序列位置重新归并成一个有序序列
         fenxings.sort(key=lambda f: f.index)
+        self.fenxings = fenxings
         return fenxings

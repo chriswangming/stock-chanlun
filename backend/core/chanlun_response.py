@@ -18,15 +18,7 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis, save_to_local: bool = Fa
     ]
     period = level_to_period(result.level)
     data_period_note = "5min" if result.level == "1min" else period
-    if save_to_local is True:
-        import json
-        from pathlib import Path
-        dir_path = Path(__file__).resolve().parent
-        dir_path.mkdir(parents=True, exist_ok=True)
-        with open(dir_path / f"{result.stock_code}.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-    return {
+    res = {
         "stock_code": result.stock_code,
         "level": result.level,
         "data_period": data_period_note,
@@ -53,6 +45,16 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis, save_to_local: bool = Fa
                 ],
             }
             for m in result.merged_klines
+        ],
+        "fenxings": [
+            {
+                "date": str(f.date)[:19],
+                "high": f.high,
+                "low": f.low,
+                "type": f.type,
+                "index": f.index
+            }
+            for f in result.fenxings
         ],
         "bis": [
             {
@@ -121,3 +123,21 @@ def serialize_chanlun_analysis(result: ChanlunAnalysis, save_to_local: bool = Fa
             for lvl in result.support_resistance
         ],
     }
+
+    res['count'] = {"kline": len(res['klines']),
+                    "kline_combine": len(res['merged_klines']),
+                    "fenxings":len(res['fenxings']),
+                    "bi": len(res['bis'])
+                    }
+    
+
+
+    if save_to_local is True:
+        import json
+        from pathlib import Path
+        dir_path = Path(__file__).resolve().parent
+        dir_path.mkdir(parents=True, exist_ok=True)
+        with open(dir_path / f"{res['stock_code']}.json", "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False, indent=2)
+
+    return res

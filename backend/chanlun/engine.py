@@ -122,6 +122,7 @@ class ChanlunEngine:
             level=level,
             klines=kline_objects,
             merged_klines=bi_detector._fenxing_detector.merged_klines,
+            fenxings=bi_detector._fenxing_detector.fenxings,
             bis=bis,
             xians=segments,
             zhongshus=zhongshus,
