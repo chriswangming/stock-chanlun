@@ -54,17 +54,6 @@ class BiDetector:
         self._fenxing_detector = FenxingDetector(self.klines)
         self._fenxings: list[Fenxing] = []
 
-    # @property
-    # def processed_klines(self) -> list[MergedKLine]:
-    #     """
-    #     包含处理后的 K 线序列（即分型与笔真正跑在上面的那个序列）。
-
-    #     Note:
-    #         与 ``self.klines``（原始K线）不同：这个序列更短、下标已重排。
-    #         需要对外画出与笔一致的图形时用这个，需要原始行情时用 ``klines``。
-    #     """
-    #     return self._fenxing_detector.merged_klines
-
     @staticmethod
     def compress_fenxings(fenxings: list[Fenxing]) -> list[Fenxing]:
         """
@@ -195,10 +184,6 @@ class BiDetector:
             而不是按合并后那根更短的序列。切勿改成分型下标相减。
         """
         dates = self._date_values
-        # np.datetime64 显式转换：部分 numpy/pandas 版本组合下，datetime64 数组与裸
-        # datetime/Timestamp 标量比较会抛 TypeError，需先转换为同类型再比较
-        # side="left"：命中已有日期时取其首次出现位置，保证 start 自身被计入
         left = int(np.searchsorted(dates, np.datetime64(start), side="left")) # type: ignore
-        # side="right"：跳过所有与 end 相同的日期，保证 end 自身被计入区间
         right = int(np.searchsorted(dates, np.datetime64(end), side="right")) # type: ignore
         return max(0, right - left)
