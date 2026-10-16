@@ -23,13 +23,6 @@ from ai.divergence import DivergenceDetector
 from ai.llm_client import get_llm_client
 from ai.strategy_engine import StrategyEngine
 from ai.wave_classifier import WaveClassifier
-# 注：ChanlunAnalysis 随 chanlun/elements.py 一并下线，此处不再引用
-# from core.chanlun_analysis import (
-#     DEFAULT_KLINE_LIMIT,
-#     chanlun_cache_key,
-#     get_kline_df_for_ai,
-#     run_analysis,
-# )
 from newchan.ChanConfig import CChanConfig
 from newchan.Chan import CChan
 from newchan.Common.CEnum import AUTYPE, KL_TYPE, DATA_SRC
