@@ -160,6 +160,8 @@ def _create_ctx():
     orig_start = threading.Thread.start
 
     def _start(self, *args, **kwargs):
+        """给富途 SDK 内部起的后台线程设 daemon=True，避免 OpenD 断连时线程卡住进程退出。
+        """
         try:
             fn = getattr(self, "_target", None)
             if str(getattr(fn, "__module__", "")).startswith("futu"):
@@ -194,6 +196,8 @@ def _get_ctx():
 
 
 def _safe_close(ctx):
+    """关连接：吞掉所有异常，避免关停阶段的噪声掩盖真正的错误。
+    """
     try:
         ctx.close()
     except Exception:
@@ -255,6 +259,8 @@ def _call(fn, timeout: float = CALL_TIMEOUT):
     box: dict = {}
 
     def _run():
+        """在工作线程里跑富途调用，结果或异常都塞进 box 交还主线程原样抛出。
+        """
         try:
             box["value"] = fn()
         except BaseException as e:  # noqa: BLE001 - 原样抛给调用方
@@ -397,6 +403,8 @@ _ADJUST_TO_AU = {
 
 
 def _ktype_of(period: str):
+    """把本项目周期串（如 "day"/"60m"）映射成富途 KLType；不支持的周期直接抛 FutuError。
+    """
     futu = _futu()
     name = _PERIOD_TO_KL.get(str(period).strip().lower())
     if name is None:
@@ -405,6 +413,8 @@ def _ktype_of(period: str):
 
 
 def _autype_of(adjust: Optional[str]):
+    """把复权参数映射成富途 AuType；不传或认不出时按前复权（QFQ）处理。
+    """
     futu = _futu()
     key = _ADJUST_TO_AU.get(str(adjust).strip().lower() if adjust else None, "QFQ")
     return getattr(futu.AuType, key)
@@ -464,6 +474,8 @@ _CACHE_MAX_ENTRIES = 512
 
 
 def _cache_get(key: str):
+    """读缓存：命中且未过期则移到队尾并返回；过期则删掉返回 None。
+    """
     with _cache_lock:
         entry = _cache.get(key)
         if entry is None:
@@ -477,6 +489,8 @@ def _cache_get(key: str):
 
 
 def _cache_set(key: str, data, ttl: int = 60):
+    """写缓存：已存在则刷新位置，超容量时淘汰最久未用的；ttl 是秒。
+    """
     with _cache_lock:
         if key in _cache:
             _cache.move_to_end(key)
@@ -1374,6 +1388,8 @@ def _parse_news_time(raw) -> str:
 
 
 def _search_news_rows(keyword: str, max_count: int) -> list[dict]:
+    """调富途 get_search_news 搜资讯；非 RET_OK 抛 FutuError，无结果返回空列表。
+    """
     futu = _futu()
     ctx = _get_ctx()
     ret, data = _retry(

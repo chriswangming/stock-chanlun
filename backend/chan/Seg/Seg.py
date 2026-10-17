@@ -48,19 +48,14 @@ class CSeg(Generic[LINE_TYPE]):
     """
 
     def __init__(self, idx: int, start_bi: LINE_TYPE, end_bi: LINE_TYPE, is_sure=True, seg_dir=None, reason="normal"):
-        """
-        Args:
-            idx: 线段的序号
-            start_bi: 起点笔
-            end_bi: 终点笔
-            is_sure: 是否是确认线段
-            seg_dir: 线段方向；None 时取终点笔的方向
-            reason: 生成这条线段的理由（一段标识字符串，便于调试/回溯）
+        """用首尾笔造出一条线段，登记方向、确认状态等核心状态。
 
-        Note:
-            开头这条断言是线段方向自洽的前提：线段必须以"与终笔同向的笔"结束
-            （起点笔是序列第 0 号时无法比较方向，未确认线段则放宽）。
-            同理，笔数不足 3 根的线段只可能是未确认线段，所以后面会强制把 is_sure 置 False。
+        要点：
+        - 方向默认取终笔方向，「补收尾」这类场景需要外部显式指定
+        - 开头这条断言是方向自洽的前提：线段必须以「与终笔同向的笔」结束
+          （起点笔是序列第 0 号时无法比较方向，未确认线段则放宽）
+        - 笔数不足 3 根的线段只可能是未确认线段，会强制把 is_sure 置 False
+        - reason 只是便于调试回溯的标识字符串，不参与计算
         """
         assert start_bi.idx == 0 or start_bi.dir == end_bi.dir or not is_sure, f"{start_bi.idx} {end_bi.idx} {start_bi.dir} {end_bi.dir}"
         self.idx = idx
@@ -99,15 +94,12 @@ class CSeg(Generic[LINE_TYPE]):
         self.seg_idx = idx
 
     def check(self):
-        """
-        自检：端点高低要和方向一致、长度要够。
+        """自检线段的端点高低与长度是否自洽。
 
-        Raises:
-            CChanException: 下降线段却没走低 / 上升线段却没走高（ErrCode.SEG_END_VALUE_ERR），
-                或线段不足 3 根笔（ErrCode.SEG_LEN_ERR）
-
-        Note:
-            只对确认线段做检查：未确认线段本来就可能是"半截"，自检没有意义。
+        要点：
+        - 只对确认线段做检查：未确认线段本来就可能是"半截"，自检没有意义
+        - 下降线段必须走低、上升线段必须走高，否则抛 SEG_END_VALUE_ERR
+        - 线段至少要由 3 根笔构成（起、中、终），否则抛 SEG_LEN_ERR
         """
         if not self.is_sure:
             return
@@ -125,27 +117,19 @@ class CSeg(Generic[LINE_TYPE]):
         return f"{self.start_bi.idx}->{self.end_bi.idx}: {self.dir}  {self.is_sure}"
 
     def add_zs(self, zs):
-        """
-        把一个中枢挂到本线段上。
+        """把一个落在本线段区间内的中枢挂到本线段上。
 
-        Args:
-            zs: 落在本线段区间内的中枢
-
-        Note:
-            调用方（KLine_List.update_zs_in_seg）是按"从新到旧"的顺序遍历中枢的，
-            这里把新中枢放在最前面，等遍历完，zs_lst 自然就是时间递增的。
+        要点：
+        - 调用方 KLine_List.update_zs_in_seg 是"从新到旧"遍历中枢的，
+          这里把新中枢放在最前面，等遍历完 zs_lst 自然就是时间递增的
         """
         self.zs_lst = [zs] + self.zs_lst  # 因为中枢是反序加入的
 
     def cal_klu_slope(self):
-        """
-        线段的"斜率"：单位K线上的相对涨幅。
+        """线段的斜率：(终点值-起点值)/K线序号差/起点值。
 
-        Returns:
-            float: (终点值-起点值)/K线根数/起点值
-
-        Note:
-            这里除以的是原 K线 序号之差（不含 +1），与 CBi.get_klu_cnt 的口径差 1。
+        要点：
+        - 除以的是首尾原始K线的 idx 之差（不含 +1），与 get_klu_cnt 的口径差 1
         """
         assert self.end_bi.idx >= self.start_bi.idx
         return (self.get_end_val()-self.get_begin_val())/(self.get_end_klu().idx-self.get_begin_klu().idx)/self.get_begin_val()
@@ -163,21 +147,11 @@ class CSeg(Generic[LINE_TYPE]):
         self.zs_lst = []
 
     def _low(self):
-        """
-        线段区间的最低价。
-
-        Note:
-            与 CBi._low 同理：下降线段的低点在终点，上升线段的低点在起点。
-        """
+        """线段区间的最低价：下降线段的低点在终点，上升线段的低点在起点（与 CBi._low 同理）。"""
         return self.end_bi.get_end_klu().low if self.is_down() else self.start_bi.get_begin_klu().low
 
     def _high(self):
-        """
-        线段区间的最高价。
-
-        Note:
-            与 CBi._high 同理：上升线段的高点在终点，下降线段的高点在起点。
-        """
+        """线段区间的最高价：上升线段的高点在终点，下降线段的高点在起点（与 CBi._high 同理）。"""
         return self.end_bi.get_end_klu().high if self.is_up() else self.start_bi.get_begin_klu().high
 
     def is_down(self):
@@ -199,7 +173,7 @@ class CSeg(Generic[LINE_TYPE]):
     # 现在或曾经是确认线段（True 表示这条线段的形态曾经成立过）
     @property
     def is_used_to_be_sure(self) -> bool:
-        """Returns: bool: 是否是（或曾经是）确认线段。"""
+        """是否是（或曾经是）确认线段。"""
         return self.is_sure or self.used_to_be_sure
 
     def amp(self):
@@ -219,21 +193,12 @@ class CSeg(Generic[LINE_TYPE]):
         return self.get_end_klu().idx - self.get_begin_klu().idx + 1
 
     def cal_macd_metric(self, macd_algo, is_reverse):
-        """
-        算本线段的力度标量（用于线段级别的背驰比较）。
+        """算本线段的力度标量（用于线段级别的背驰比较）。
 
-        Args:
-            macd_algo: 只支持 MACD_ALGO.SLOPE（斜率）与 MACD_ALGO.AMP（涨跌幅）
-            is_reverse: 线段上的力度是"价格型"口径，与正序/倒序无关，仅为保持签名一致
-
-        Returns:
-            float: 力度值
-
-        Raises:
-            CChanException: 传入了这两种以外的算法（ErrCode.PARA_ERROR）
-
-        Note:
-            线段是笔的上一级，MACD 柱子是按笔算的，所以这里不做面积类口径。
+        要点：
+        - 只支持 MACD_ALGO.SLOPE（斜率）与 MACD_ALGO.AMP（涨跌幅），其它抛 PARA_ERROR
+        - 线段是笔的上一级，MACD 面积是按笔算的，所以这里不做面积类口径
+        - 价格型力度与正序/倒序无关，is_reverse 只是为保持与其它层级一致的签名
         """
         if macd_algo == MACD_ALGO.SLOPE:
             return self.Cal_MACD_slope()
@@ -243,12 +208,11 @@ class CSeg(Generic[LINE_TYPE]):
             raise CChanException(f"unsupport macd_algo={macd_algo} of Seg, should be one of slope/amp", ErrCode.PARA_ERROR)
 
     def Cal_MACD_slope(self):
-        """
-        线段的斜率：单位K线上的相对涨幅（与 CBi.Cal_MACD_slope 同一口径）。
+        """线段的斜率（与 CBi.Cal_MACD_slope 同一口径）。
 
-        Returns:
-            float: 向上 -> (终点高-起点低)/终点高/K线根数；
-                   向下 -> (起点高-终点低)/起点高/K线根数
+        要点：
+        - 向上：(终点高-起点低)/终点高/K线根数
+        - 向下：(起点高-终点低)/起点高/K线根数
         """
         begin_klu = self.get_begin_klu()
         end_klu = self.get_end_klu()
@@ -258,11 +222,11 @@ class CSeg(Generic[LINE_TYPE]):
             return (begin_klu.high - end_klu.low)/begin_klu.high/(end_klu.idx - begin_klu.idx + 1)
 
     def Cal_MACD_amp(self):
-        """
-        线段的涨跌幅（与 CBi.Cal_MACD_amp 同一口径）。
+        """线段的涨跌幅（与 CBi.Cal_MACD_amp 同一口径）。
 
-        Returns:
-            float: 向下 -> (起点高-终点低)/起点高；向上 -> (终点高-起点低)/起点低
+        要点：
+        - 向下：(起点高-终点低)/起点高
+        - 向上：(终点高-起点低)/起点低
         """
         begin_klu = self.get_begin_klu()
         end_klu = self.get_end_klu()
@@ -272,17 +236,11 @@ class CSeg(Generic[LINE_TYPE]):
             return (end_klu.high-begin_klu.low)/begin_klu.low
 
     def update_bi_list(self, bi_lst, idx1, idx2):
-        """
-        把 [idx1, idx2] 区间内的笔登记为本线段的成员。
+        """把 [idx1, idx2] 区间（含两端）内的笔登记为本线段成员，并给每根笔回写 parent_seg。
 
-        Args:
-            bi_lst: 完整的笔列表
-            idx1: 起始笔的 idx
-            idx2: 终止笔的 idx（含）
-
-        Note:
-            这里是直接 append，调用方必须保证同一段不会被重复登记，否则 bi_list 会重复。
-            成员凑够 3 根笔之后才会去拟合内部的支撑/压力趋势线。
+        要点：
+        - 这里是 append 语义，调用方必须保证同一段不会被重复登记，否则 bi_list 会重复
+        - 成员凑够 3 根笔之后才会去拟合内部的支撑/压力趋势线
         """
         for bi_idx in range(idx1, idx2+1):
             bi_lst[bi_idx].parent_seg = self
@@ -293,12 +251,7 @@ class CSeg(Generic[LINE_TYPE]):
             self.resistance_trend_line = CTrendLine(self.bi_list, TREND_LINE_SIDE.OUTSIDE)
 
     def get_first_multi_bi_zs(self):
-        """
-        取本线段内第一个"真正的中枢"（不是由单根笔构成的中枢）。
-
-        Returns:
-            Optional[CZS]: 没有则返回 None
-        """
+        """取本线段内第一个非一笔中枢（由单根笔构成的中枢不算），没有则返回 None。"""
         return next((zs for zs in self.zs_lst if not zs.is_one_bi_zs()), None)
 
     def get_multi_bi_zs_lst(self):
@@ -306,12 +259,7 @@ class CSeg(Generic[LINE_TYPE]):
         return [zs for zs in self.zs_lst if not zs.is_one_bi_zs()]
 
     def get_final_multi_bi_zs(self):
-        """
-        取本线段内最后一个"真正的中枢"。
-
-        Returns:
-            Optional[CZS]: 从后往前找第一个非一笔中枢，没有则返回 None
-        """
+        """取本线段内最后一个非一笔中枢（从后往前找），没有则返回 None。"""
         zs_idx = len(self.zs_lst) - 1
         while zs_idx >= 0:
             zs = self.zs_lst[zs_idx]

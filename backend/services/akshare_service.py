@@ -185,6 +185,8 @@ _cache_lock = threading.RLock()
 
 
 def _cache_get(key: str):
+    """读缓存：命中且未过期则移到队尾并返回；过期则删掉返回 None。
+    """
     with _cache_lock:
         entry = _cache.get(key)
         if entry is None:
@@ -198,6 +200,8 @@ def _cache_get(key: str):
 
 
 def _cache_set(key: str, data, ttl: int = 60):
+    """写缓存：已存在则刷新位置，超容量时淘汰最久未用的；ttl 是秒。
+    """
     with _cache_lock:
         if key in _cache:
             _cache.move_to_end(key)
@@ -246,6 +250,12 @@ def get_realtime_quote(codes: list[str]) -> pd.DataFrame:
     BATCH = 150
 
     def _fetch_batch(batch: list[str]) -> list[dict]:
+        """拉一批（多只）实时行情：拼腾讯 qt.gtimg.cn 的批量 URL 后解析 ~ 分隔字段。
+        
+        要点：
+        - 字段少于 38 个的行视为脏数据跳过；单条解析失败不影响同批其它记录
+        - 整批失败只记日志并返回空列表，由上层决定是否降级
+        """
         qq_codes = []
         for code in batch:
             sym, _ = normalize_stock_code(code)
@@ -1034,6 +1044,8 @@ def _load_concept_name_map() -> None:
 
 
 def _finite_num(v, default: float = 0.0) -> float:
+    """把任意值安全转 float：None / NaN / 不可转换都退回 default（默认 0.0）。
+    """
     try:
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return default
@@ -1368,6 +1380,8 @@ def _fetch_em_hot_stocks(limit: int) -> list:
     total_pages = (limit + PAGE_SIZE - 1) // PAGE_SIZE
 
     def fetch_page(pn: int) -> list[dict]:
+        """拉东财涨幅榜的第 pn 页，按 PAGE_SIZE 取；失败只记日志并返回空列表。
+        """
         try:
             js = _em_clist_request(
                 {
@@ -1518,6 +1532,8 @@ def warm_hot_cache():
     """后台线程预热热门股票缓存（5 分钟刷新一次）。"""
     import threading, time
     def _loop():
+        """后台预热线程主循环：每 5 分钟刷一次热门榜缓存。
+        """
         while True:
             _fetch_and_cache_hot(20)
             time.sleep(300)
@@ -1692,6 +1708,8 @@ def get_stock_boards_em(code: str) -> dict:
     seen: set[str] = set()
 
     def _add(label: str, val):
+        """按标签名是否命中关注词表，把该字段收进 highlights（同名只收一次）。
+        """
         if val is None:
             return
         val_s = str(val).strip()

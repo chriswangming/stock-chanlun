@@ -30,33 +30,25 @@ class CEigen(CKLine_Combiner[CBi]):
     """
 
     def __init__(self, bi, _dir):
-        """
-        Args:
-            bi: 本元素的第一根笔
-            _dir: 合并方向（KLINE_DIR.UP/DOWN），由上层按线段方向给出
+        """用第一根笔开出一个特征序列元素。
 
-        Note:
-            gap 初始为 False，要等分型判定出来之后（update_fx）才有意义。
+        要点：
+        - _dir 是包含合并的方向（KLINE_DIR.UP/DOWN），由上层按线段方向给出
+        - gap 初始为 False，要等分型判出来之后（update_fx）才有意义
         """
         super(CEigen, self).__init__(bi, _dir)
         self.gap = False
 
     def update_fx(self, _pre: Self, _next: Self, exclude_included=False, allow_top_equal=None):
-        """
-        先按普通（或特征序列）口径判分型，再补判"与前一元素之间是否存在缺口"。
+        """先按普通（或特征序列）口径判分型，再补判"与前一元素之间是否存在缺口"。
 
-        Args:
-            _pre: 前一个特征序列元素
-            _next: 后一个特征序列元素
-            exclude_included: 被包含时是否不合并（特征序列永远传 True）
-            allow_top_equal: 顶/底相等时的口径，含义见 KLine_Combiner.test_combine
-
-        Note:
-            缺口的定义是"两个元素的价格区间完全没有交集"：
-                顶分型的元素，其低点还高过前一元素的高点；
-                底分型的元素，其高点还低过前一元素的低点。
-            有缺口的分型不能直接终结线段（标准做法要求后面再出现反向分型），
-            所以 EigenFX.can_be_end 会另外去找那个反向分型。
+        要点：
+        - 缺口的定义是"两个元素的价格区间完全没有交集"：顶分型的元素其低点还高过前一元素的高点，
+          底分型的元素其高点还低过前一元素的低点
+        - 有缺口的分型不能直接终结线段（标准做法要求后面再出现反向分型），
+          所以 EigenFX.can_be_end 会另外去找那个反向分型
+        - exclude_included 在特征序列口径下恒为 True（被包含的笔不参与合并）；
+          allow_top_equal 是顶/底相等时的放宽口径，含义见 KLine_Combiner.test_combine
         """
         super(CEigen, self).update_fx(_pre, _next, exclude_included, allow_top_equal)
         if (self.fx == FX_TYPE.TOP and _pre.high < self.low) or \
@@ -68,23 +60,17 @@ class CEigen(CKLine_Combiner[CBi]):
         return f"{self.lst[0].idx}~{self.lst[-1].idx} gap={self.gap} fx={self.fx}"
 
     def GetPeakBiIdx(self):
-        """
-        取线段终点应该落在哪一根笔上。
+        """取线段终点应该落在哪一根笔上（返回该笔的下标）。
 
-        Returns:
-            int: 线段终点笔的下标
-
-        Note:
-            取法：在本元素内找到造出极值的那根笔，再往前退一根（idx-1）。
-            理由（以"上升线段的元素都是向下笔"为例）：
-            极值笔是那个最低点所在的向下笔，而它前面那根是向上笔，
-            向上笔的终点（高点）才是这条上升线段真正的终点 —— 所以取 idx-1。
-            下降线段同理，只是方向反过来。
+        要点：
+        - 取法：在本元素内找到造出极值的那根笔，再往前退一根（idx-1）
+        - 上升线段（元素都是向下笔）：取高点最高的那根向下笔，退一根就是它前面那根向上笔，
+          向上笔的终点（高点）才是这条上升线段真正的终点
+        - 下降线段（元素都是向上笔）对称：取低点最低的那根向上笔，退一根是向下笔，其终点即线段终点
         """
         assert self.fx != FX_TYPE.UNKNOWN
         bi_dir = self.lst[0].dir
-        if bi_dir == BI_DIR.UP:  # 下降线段
-        # 元素是向上笔（属于下降线段）：取最低那根，再退一根就是终点向前走的最后一根
+        if bi_dir == BI_DIR.UP:  # 下降线段：元素都是向上笔，取低点最低的那根，再退一根
             return self.get_peak_klu(is_high=False).idx-1
-        else:
+        else:  # 上升线段：元素都是向下笔，取高点最高的那根，再退一根
             return self.get_peak_klu(is_high=True).idx-1

@@ -60,13 +60,11 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
     """
 
     def __init__(self, bs_point_config: CBSPointConfig):
-        """
-        Args:
-            bs_point_config: 买卖点配置 CBSPointConfig（内含买侧/卖侧两份 CPointConfig）
+        """建一个空的买卖点容器，配置决定后续判定与分桶行为。
 
-        Note:
-            last_sure_pos 初值 -1、last_sure_seg_idx 初值 0，表示"一切都没定稿"，
-            第一次 cal() 会从头算一遍并把游标推到真正的定稿位置。
+        要点：
+        - last_sure_pos 初值 -1、last_sure_seg_idx 初值 0，表示"一切都还没定稿"
+        - 第一次 cal() 会从头算一遍，并把游标推到真正的定稿位置
         """
         self.bsp_store_dict: Dict[BSP_TYPE, Tuple[List[CBS_Point[LINE_TYPE]], List[CBS_Point[LINE_TYPE]]]] = {}
         self.bsp_store_flat_dict: Dict[int, CBS_Point[LINE_TYPE]] = {}
@@ -79,16 +77,12 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.last_sure_seg_idx = 0
 
     def store_add_bsp(self, bsp_type: BSP_TYPE, bsp: CBS_Point[LINE_TYPE]):
-        """
-        把一个买卖点登记进"按类型分桶"的存储。
+        """把一个买卖点登记进"按类型分桶"的存储（一个买卖点只登记一次，取它首次命中的类型）。
 
-        Args:
-            bsp_type: 登记在哪个类型桶下（一个买卖点只登记一次，取它首次命中的类型）
-            bsp: 待登记的买卖点
-
-        Note:
-            下标直接吃布尔值：bsp.is_buy 为 False 时取元组第 0 项（卖点列表），
-            True 时取第 1 项（买点列表），所以元组的顺序是 (卖点列表, 买点列表)。
+        要点：
+        - 桶的元组顺序是 (卖点列表, 买点列表)，直接用 bsp.is_buy 当下标取，所以元组的顺序是 (卖点列表, 买点列表)
+        - 断言"同一桶内笔 idx 必须递增"——bsp_iter_v2 的多路归并依赖这个前提
+        - 同时登记进 bsp_store_flat_dict（按笔 idx 的平铺索引），供去重与 __len__ 使用
         """
         if bsp_type not in self.bsp_store_dict:
             self.bsp_store_dict[bsp_type] = ([], [])
@@ -99,16 +93,11 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.bsp_store_flat_dict[bsp.bi.idx] = bsp
 
     def add_bsp1(self, bsp: CBS_Point[LINE_TYPE]):
-        """
-        单独登记一个1类买卖点（T1/T1P）。
+        """单独登记一个1类买卖点（T1/T1P）。
 
-        Args:
-            bsp: 1类买卖点
-
-        Note:
-            1类要单独存一份，是因为2类/3类都要"回溯对应的1类"（bsp1_dict 按笔 idx 反查），
-            而且1类里还有一类"非目标买卖点"（没通过背驰/极值检查、只是用于内部串联的），
-            它们不会进 bsp_store_dict，只存在于这里。
+        要点：
+        - 2类/3类都要靠 bsp1_dict 按笔 idx 反查"对应的1类"，所以1类要单独存一份
+        - 没通过背驰/极值检查的1类是"非目标买卖点"，不会进 bsp_store_dict，只存在于这里作内部串联
         """
         if len(self.bsp1_list) > 0:
             assert self.bsp1_list[-1].bi.idx < bsp.bi.idx
@@ -116,17 +105,14 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.bsp1_dict[bsp.bi.idx] = bsp
 
     def clear_store_end(self):
-        """
-        撤销"尾部失效"的买卖点（分桶存储那一侧）。
+        """撤销"尾部失效"的买卖点（分桶存储那一侧）。
 
-        Note:
-            为什么需要撤销：每来一根新K线，尾部的线段/中枢都可能被重算，
-            原先推导出来的买卖点可能压根不该存在、或者会挪位置；
-            如果不先撤掉就重算，会残留一批"幽灵买卖点"。
-
-            撤销到哪为止：从每个桶的尾部往前删，直到遇到"结束K线 idx <= last_sure_pos"
-            的买卖点为止 —— 那之前的都已被确认线段定稿，不会再变，必须保留，
-            否则同一个买卖点会被反复删除重建（而且1类的 add_bsp1 断言会炸）。
+        要点：
+        - 为什么撤销：每来一根新K线，尾部的线段/中枢都会被重算，原先推导出的买卖点
+          可能压根不该存在、或者会挪位置；不先撤掉就重算会残留一批"幽灵买卖点"
+        - 撤销到哪为止：从每个桶尾部往前删，遇到"结束K线 idx <= last_sure_pos"的就停
+        - 已定稿的部分必须保留，否则同一买卖点会被反复删除重建（add_bsp1 的 idx 断言也会炸）
+        - 撤销时顺带把 bi.bsp 反向指针摘掉
         """
         for bsp_list in self.bsp_store_dict.values():
             for is_buy in [True, False]:
@@ -139,14 +125,11 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                     bsp_list[is_buy].pop()
 
     def clear_bsp1_end(self):
-        """
-        撤销"尾部失效"的1类买卖点（bsp1_list 那一侧），规则与 clear_store_end 完全一致。
+        """撤销"尾部失效"的1类买卖点（bsp1_list 那一侧），规则与 clear_store_end 完全一致。
 
-        Note:
-            调用顺序有讲究：cal() 先 clear_store_end 再 clear_bsp1_end。
-            目标买卖点在两步里都会被撤（它同时存在于两个索引），
-            而它的 bi.bsp 反向指针是在 clear_store_end 里摘掉的，
-            所以这里不必再摘一次。
+        要点：
+        - cal() 先 clear_store_end 再 clear_bsp1_end：目标买卖点在两步里都会被撤
+        - bi.bsp 反向指针是在 clear_store_end 里摘掉的，这里不必再摘一次
         """
         while len(self.bsp1_list) > 0:
             if self.bsp1_list[-1].bi.get_end_klu().idx <= self.last_sure_pos:
@@ -155,31 +138,24 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             self.bsp1_list.pop()
 
     def bsp_iter(self) -> Iterable[CBS_Point[LINE_TYPE]]:
-        """
-        按"类型桶"顺序遍历全部买卖点（每个桶内先买后卖，各桶按插入顺序）。
+        """按"类型桶"顺序遍历全部买卖点（每个桶内先买后卖，各桶按插入顺序）。
 
-        Yields:
-            CBS_Point: 每一个已登记的目标买卖点
-
-        Note:
-            这里的顺序是"按类型分桶"，不是时间序，画图/回测要时间序请用 getSortedBspList()。
+        要点：
+        - 产出顺序是"按类型分桶"，没有时间含义；要时间序请用 getSortedBspList()
+        - 只产出已登记进分桶存储的目标买卖点，非目标的1类不在这里
         """
         for bsp_list in self.bsp_store_dict.values():
             yield from bsp_list[True]
             yield from bsp_list[False]
 
     def bsp_iter_v2(self) -> Iterable[CBS_Point[LINE_TYPE]]:
-        """
-        按笔 idx 从新到旧归并遍历全部买卖点（多桶 k 路归并）。
+        """按笔 idx 从新到旧归并遍历全部买卖点（多桶 k 路归并），第一个产出的就是最新的买卖点。
 
-        Yields:
-            CBS_Point: 从最新一个买卖点开始，逐个往前产出
-
-        Note:
-            每一轮线性扫描所有桶的当前游标，挑出 bi.idx 最大的那个产出并把它的游标前移，
-            复杂度 O(桶数 × 总数)；它依赖"每个桶内部按 idx 递增"这一前提
-            （由 store_add_bsp 里的断言保证）。之所以要归并而不是排序，
-            是因为 get_latest_bsp 常常只取最近几个，没必要把全部结果排一遍。
+        要点：
+        - 每一轮线性扫描所有桶的当前游标，挑 bi.idx 最大的那个产出并把该游标前移，复杂度 O(桶数 × 总数)
+        - 依赖"每个桶内部按 idx 递增"这一前提（由 store_add_bsp 里的断言保证）
+        - 之所以归并而非排序：get_latest_bsp 常常只取最近几个，没必要把全部结果排一遍
+        - 只取最新一个时可以直接 next(iter(self.bsp_iter_v2()))
         """
         # 每个元素 = [类型, 是否买点, 该桶当前游标]；游标从桶尾（最新）起步，逐轮往前挪
         list_indices = []
@@ -213,27 +189,17 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                 list_indices.pop(max_idx)
 
     def __len__(self):
-        """
-        Returns:
-            int: 当前持有的买卖点个数（= 去重后涉及到的笔数，等价于 len(bsp_store_flat_dict)）
-        """
+        """当前持有的买卖点个数（= 去重后涉及到的笔数）。"""
         return len(self.bsp_store_flat_dict)
 
     def cal(self, bi_list: LINE_LIST_TYPE, seg_list: CSegListComm[LINE_TYPE]):
-        """
-        计算入口：把买卖点重算到最新（幂等，可反复调用）。
+        """计算入口：把买卖点重算到最新（幂等，可反复调用）。
 
-        Args:
-            bi_list: 笔（或线段）序列，买卖点最终落在其中的某根元素上
-            seg_list: 线段（或线段段）序列，1/2/3类判定都是以"线段"为单位组织的
-
-        Note:
-            顺序不能换：
-              1) 先撤销尾部失效的旧买卖点（两个索引都要清）；
-              2) 再按 1类 -> 2类 -> 3类 的顺序算 —— 2/3类要靠 bsp1_dict 找对应的1类，
-                 所以1类必须先算完；
-              3) 最后更新定稿游标 last_sure_pos，供下一次重算判断"撤到哪为止"。
-            每次都从 last_sure_seg_idx 之后的线段重算，已定稿的部分不重复劳动。
+        要点：
+        - 顺序不能换：先撤销尾部失效的旧买卖点（两个索引都要清），再算新的
+        - 1类 -> 2类 -> 3类：2/3类要靠 bsp1_dict 找对应的1类，所以1类必须先算完
+        - 最后更新定稿游标 last_sure_pos，供下一次重算判断"撤到哪为止"
+        - 每次只从 last_sure_seg_idx 之后的线段重算，已定稿的部分不重复劳动
         """
         self.clear_store_end()
         self.clear_bsp1_end()
@@ -244,17 +210,12 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.update_last_pos(seg_list)
 
     def update_last_pos(self, seg_list: CSegListComm):
-        """
-        更新定稿游标：从后往前找最后一个"确认线段"，把它的位置记下来。
+        """更新定稿游标：从后往前找最后一个"确认线段"，把它的位置记下来。
 
-        Args:
-            seg_list: 线段序列
-
-        Note:
-            last_sure_pos 取的是"该线段终笔的起点K线 idx"而不是终点，
-            也就是说最后一条确认线段的收尾部分仍被视为未定稿、每次都会重算
-            （因为它的中枢/背驰还可能随新K线变化）。
-            一个确认线段都找不到时保持 last_sure_pos=-1，表示全部都未定稿。
+        要点：
+        - last_sure_pos 取"该线段终笔的起点K线 idx"而不是终点，即最后一条确认线段的
+          收尾部分仍算未定稿、每次都要重算（它的中枢/背驰还可能随新K线变化）
+        - 一个确认线段都找不到时保持 last_sure_pos=-1、last_sure_seg_idx=0，表示全部未定稿
         """
         self.last_sure_pos = -1
         self.last_sure_seg_idx = 0
@@ -268,15 +229,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             seg_idx -= 1
 
     def seg_need_cal(self, seg: CSeg):
-        """
-        判断这条线段是否还需要重算买卖点。
-
-        Args:
-            seg: 待判断的线段
-
-        Returns:
-            bool: 线段的结束K线还在定稿线之后（未定稿）则为 True
-        """
+        """判断这条线段是否还需要重算买卖点（线段的结束K线还在定稿线之后则为 True）。"""
         return seg.end_bi.get_end_klu().idx > self.last_sure_pos
 
     def add_bs(
@@ -287,25 +240,16 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         is_target_bsp: bool = True,
         feature_dict=None,
     ):
-        """
-        登记（或合并）一个买卖点 —— 全模块唯一的"去重 + 入库"入口。
+        """登记（或合并）一个买卖点 —— 全模块唯一的"去重 + 入库"入口。
 
-        Args:
-            bs_type: 本次命中的买卖点类型
-            bi: 买卖点所在的那根笔/线段
-            relate_bsp1: 对应的1类买卖点（2/3类传进来，1类传 None）
-            is_target_bsp: 调用方给出的"资格"判定（中枢个数够不够、背驰成不成立…）
-            feature_dict: 本类买卖点的专属特征，会合并进该买卖点的特征表
-
-        Note:
-            处理顺序（每一步都可能提前 return）：
-              1) 买/卖由笔方向推出，不查配置；
-              2) 若这根笔上已有买卖点，就只"叠加类型 + 合并特征"后返回 —— 这就是去重，
-                 保证"一根笔一个实例"，也保证 bi.bsp 反向指针不会被后来者悄悄替换；
-              3) 类型不在配置的 target_types 里 -> 降级成"非目标买卖点"；
-              4) 非目标且不是1类 -> 直接丢弃（非目标的2/3类没有存在意义）；
-              5) 目标买卖点进分桶存储；非目标的要把 bi.bsp 摘掉，避免污染笔上的展示；
-              6) 1类（T1/T1P）无论是否目标，都额外登记进 bsp1_list / bsp1_dict。
+        要点（每一步都可能提前 return）：
+        - 买/卖由笔方向推出来，不查配置：向下笔结束在低点即买点
+        - 这根笔上已有买卖点时只"叠加类型 + 合并特征"就返回 —— 这就是去重，
+          保证"一根笔一个实例"，也保证 bi.bsp 反向指针不会被后来者悄悄替换
+        - 类型不在配置的 target_types 里就降级成"非目标买卖点"
+        - 非目标且不是1类直接丢弃（非目标的2/3类没有存在意义）
+        - 目标买卖点进分桶存储；非目标的要把 bi.bsp 摘掉，避免污染笔上的展示
+        - 1类（T1/T1P）无论是否目标，都额外登记进 bsp1_list / bsp1_dict
         """
         # 向下笔结束在低点 -> 买点；向上笔结束在高点 -> 卖点
         is_buy = bi.is_down()
@@ -338,15 +282,11 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             self.add_bsp1(bsp)
 
     def cal_seg_bs1point(self, seg_list: CSegListComm[LINE_TYPE], bi_list: LINE_LIST_TYPE):
-        """
-        逐条线段算1类买卖点（T1 趋势背驰 / T1P 盘整背驰）。
+        """逐条线段算1类买卖点（T1 趋势背驰 / T1P 盘整背驰）。
 
-        Args:
-            seg_list: 线段序列
-            bi_list: 笔（或线段）序列，盘整背驰要用到前一同向笔
-
-        Note:
-            只从 last_sure_seg_idx 起遍历，且跳过已经定稿的线段（seg_need_cal）。
+        要点：
+        - 只从 last_sure_seg_idx 起遍历，并用 seg_need_cal 跳过已定稿的线段
+        - 盘整背驰要用到前一同向笔，所以还得带 bi_list
         """
         for seg in seg_list[self.last_sure_seg_idx:]:
             if not self.seg_need_cal(seg):
@@ -354,17 +294,13 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             self.cal_single_bs1point(seg, bi_list)
 
     def cal_single_bs1point(self, seg: CSeg[LINE_TYPE], bi_list: LINE_LIST_TYPE):
-        """
-        算单条线段上的1类买卖点：先决定"够不够格"，再分派到趋势背驰或盘整背驰。
+        """算单条线段上的1类买卖点：先决定"够不够格"，再分派到趋势背驰或盘整背驰。
 
-        Args:
-            seg: 当前线段（注意：向下线段对应买点，所以配置按 seg.is_down() 取）
-            bi_list: 笔（或线段）序列
-
-        Note:
-            第一道门槛是中枢个数：min_zs_cnt <= 0 表示不做限制，否则线段内中枢数要达标
-            （bsp1_only_multibi_zs 决定"数全部中枢"还是"只数非一笔中枢"）。
-            中枢不够格时照样会把1类算出来，但标成非目标买卖点（只用于内部串联）。
+        要点：
+        - 向下线段对应买点，所以配置按 seg.is_down() 取
+        - 第一道门槛是中枢个数：min_zs_cnt <= 0 不做限制，否则要达标；
+          bsp1_only_multibi_zs 决定"数全部中枢"还是"只数非一笔中枢"
+        - 中枢不够格时照样把1类算出来，但标成非目标买卖点（只作内部串联）
         """
         BSP_CONF = self.config.GetBSConfig(seg.is_down())
         zs_cnt = seg.get_multi_bi_zs_cnt() if BSP_CONF.bsp1_only_multibi_zs else len(seg.zs_lst)
@@ -384,19 +320,14 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             self.treat_pz_bsp1(seg, BSP_CONF, bi_list, is_target_bsp)
 
     def treat_bsp1(self, seg: CSeg[LINE_TYPE], BSP_CONF: CPointConfig, is_target_bsp: bool):
-        """
-        趋势背驰1类买卖点（T1）：末笔突破线段最后一个中枢，且相对"进中枢那笔"背驰。
+        """趋势背驰1类买卖点（T1）：末笔突破线段最后一个中枢，且相对"进中枢那笔"背驰。
 
-        Args:
-            seg: 当前线段，买卖点落在 seg.end_bi 上
-            BSP_CONF: 该方向（买/卖）的配置
-            is_target_bsp: 调用方算出的中枢个数资格
-
-        Note:
-            两道附加门槛，任一不满足就降级为"非目标买卖点"（照样建出来，但只作内部串联）：
-              1) bs1_peak：要求出中枢那笔确实是这段行情的极值（CZS.out_bi_is_peak）；
-              2) 背驰：CZS.is_divergence 判"突破中枢"与"出/进两笔力度比 <= divergence_rate"。
-            特征里记了 divergence_rate（实际力度比）与 zs_cnt（线段内中枢个数）。
+        要点：
+        - 买卖点落在 seg.end_bi 上
+        - 两道附加门槛，任一不满足就降级为"非目标买卖点"（照样建出来，只作内部串联）：
+          bs1_peak 要求出中枢那笔确实是这段行情的极值（CZS.out_bi_is_peak）；
+          CZS.is_divergence 判"突破中枢"且"出/进两笔力度比 <= divergence_rate"
+        - 特征记 divergence_rate（实际力度比）与 zs_cnt（线段内中枢个数）
         """
         last_zs = seg.zs_lst[-1]
         break_peak, _ = last_zs.out_bi_is_peak(seg.end_bi.idx)
@@ -412,23 +343,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.add_bs(bs_type=BSP_TYPE.T1, bi=seg.end_bi, relate_bsp1=None, is_target_bsp=is_target_bsp, feature_dict=feature_dict)
 
     def treat_pz_bsp1(self, seg: CSeg[LINE_TYPE], BSP_CONF: CPointConfig, bi_list: LINE_LIST_TYPE, is_target_bsp):
-        """
-        盘整背驰1类买卖点（T1P）：中枢不够格时，改用"末笔 vs 前一同向笔"直接比力度。
+        """盘整背驰1类买卖点（T1P）：中枢不够格时，改用"末笔 vs 前一同向笔"直接比力度。
 
-        Args:
-            seg: 当前线段
-            BSP_CONF: 该方向（买/卖）的配置
-            bi_list: 笔（或线段）序列，用来取前一同向笔
-            is_target_bsp: 调用方算出的中枢个数资格
-
-        Note:
-            四道前置条件（不满足就直接放弃，连非目标买卖点都不建）：
-              1) 末笔与前一同向笔必须同属一条线段（跨段不成盘整）；
-              2) 末笔方向必须与线段方向一致（线段末笔本来就应与线段同向）；
-              3) 向下笔必须创新低 / 向上笔必须创新高，否则谈不上"背驰"；
-              4) 力度比 out_metric/in_metric 要 <= divergence_rate。
-            比力度时 in_metric 正序算、out_metric 倒序算（is_reverse=True），
-            这样两端取的都靠近"两笔交界处"，可比性最好。
+        要点：
+        - 四道前置条件，不满足就直接放弃（连非目标买卖点都不建）：
+          末笔与前一同向笔同属一条线段（跨段不成盘整）、末笔方向与线段方向一致、
+          向下笔创新低 / 向上笔创新高、力度比 out_metric/in_metric <= divergence_rate
+        - 前一同向笔取 bi_list[idx-2]（隔一根才是同向笔）
+        - in_metric 正序算、out_metric 倒序算（is_reverse=True），两端都靠近"两笔交界处"，可比性最好
+        - 力度不达标只降级为非目标买卖点，仍会建出来给2/3类串联用
         """
         last_bi = seg.end_bi
         # 取前一根"同向"笔：笔序上要隔一根（idx-2），与末笔方向相同
@@ -457,15 +380,11 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.add_bs(bs_type=BSP_TYPE.T1P, bi=last_bi, relate_bsp1=None, is_target_bsp=is_target_bsp, feature_dict=feature_dict)
 
     def cal_seg_bs2point(self, seg_list: CSegListComm[LINE_TYPE], bi_list: LINE_LIST_TYPE):
-        """
-        逐条线段算2类买卖点（T2）与类二买卖点（T2S）。
+        """逐条线段算2类买卖点（T2）与类二买卖点（T2S）。
 
-        Args:
-            seg_list: 线段序列
-            bi_list: 笔（或线段）序列
-
-        Note:
-            先按配置过滤：用户既没要 T2 也没要 T2S 的线段直接跳过，省掉后面一堆判定。
+        要点：
+        - 先按配置过滤：既没要 T2 也没要 T2S 的线段直接跳过，省掉后面一堆判定
+        - 同样只从 last_sure_seg_idx 起算，并跳过已定稿的线段
         """
         for seg in seg_list[self.last_sure_seg_idx:]:
             config = self.config.GetBSConfig(seg.is_down())
@@ -476,25 +395,16 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             self.treat_bsp2(seg, seg_list, bi_list)
 
     def treat_bsp2(self, seg: CSeg, seg_list: CSegListComm[LINE_TYPE], bi_list: LINE_LIST_TYPE):
-        """
-        2类买卖点（T2）：1类之后的第一根回撤笔，回撤幅度不超过 max_bs2_rate。
+        """2类买卖点（T2）：1类之后的第一根回撤笔，回撤幅度不超过 max_bs2_rate。
 
-        Args:
-            seg: 当前线段
-            seg_list: 线段序列（只有一条线段时要走退化分支）
-            bi_list: 笔（或线段）序列
-
-        Note:
-            两个分支的"角色"不一样，取配置的方向也相反：
-              - 有多条线段时：1类就是本线段的终笔（seg.end_bi），
-                它后面第 1 根笔是"突破笔"（break_bi，与1类同向延续），
-                第 2 根笔是"回撤笔"（bsp2_bi，方向相反 -> 买点/卖点由它决定），
-                所以配置按 seg.is_down() 取（回撤笔与线段同向）。
-              - 只有一条线段时（行情刚开始、还没有1类可依）：
-                退化成用 bi_list[0] 当突破笔、bi_list[1] 当回撤笔，
-                此时回撤笔与线段反向，所以配置要按 seg.is_up() 取才对得上。
-            回撤比例 = 回撤笔振幅 / 突破笔振幅，<= max_bs2_rate 才算2类。
-            若2类没成立且 bsp2s_follow_2=True，就直接放弃继续找类二。
+        要点：
+        - 有多条线段时：1类即本线段终笔 seg.end_bi，其后第 1 根是"突破笔"、第 2 根是"回撤笔"
+          （与线段同向，买卖方向由它决定），所以配置按 seg.is_down() 取
+        - 只有一条线段时（行情刚开始、还没有1类可依）：退化成 bi_list[0] 当突破笔、
+          bi_list[1] 当回撤笔，此时回撤笔与线段反向，配置要按 seg.is_up() 取才对得上
+        - bsp2_follow_1 要求1类那笔上真有一个已入库的买卖点，否则不认这个2类
+        - 回撤比例 = 回撤笔振幅 / 突破笔振幅，<= max_bs2_rate 才算2类
+        - 2类没成立且 bsp2s_follow_2=True 就直接返回，不再往后找类二
         """
         if len(seg_list) > 1:
             BSP_CONF = self.config.GetBSConfig(seg.is_down())
@@ -540,25 +450,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         real_bsp1: Optional[CBS_Point],
         BSP_CONF: CPointConfig,
     ):
-        """
-        类二买卖点（T2S）：2类之后，仍在同一线段内、且区间与2类那笔有重叠的后续同向笔。
+        """类二买卖点（T2S）：2类之后，仍在同一线段内、且区间与2类那笔有重叠的后续同向笔。
 
-        Args:
-            seg_list: 线段序列，用来判断"还在不在这条线段里"
-            bi_list: 笔（或线段）序列
-            bsp2_bi: 2类所在的那根笔，类二以它为基准往后找
-            break_bi: 1类后面那根突破笔，回撤比例以它的振幅为分母
-            real_bsp1: 对应的1类买卖点
-            BSP_CONF: 该方向（买/卖）的配置
-
-        Note:
-            从 bias=2 起每隔一根笔取一根（步长 2 保证取到的都是与2类同向的笔），逐个判定：
-              - 层级 lv = bias/2，超过 max_bsp2s_lv 就停；
-              - 一旦跳出当前线段（且不是"刚跨到下一段尾部"这种可接受的跨界）就停；
-              - 区间必须还与2类那笔（或此前累积下来的重叠区间）有重叠，否则说明已经走远；
-              - 已经跌破/涨破突破笔端点的就不再是回撤，停；
-              - 回撤比例（端点价差 / 突破笔振幅）超过 max_bs2_rate 就停。
-            每根满足条件的笔都会被登记成一个类二买卖点，层级记在特征 bsp2s_lv 里。
+        要点：
+        - 从 bias=2 起每隔一根取一根（步长 2 保证取到的都是与2类同向的笔），层级 lv = bias/2
+        - 任一条件不满足就停止往后找：层级超过 max_bsp2s_lv、跳出了当前线段
+          （"刚跨到下一段尾部"这种可接受）、与累积重叠区间不再有交集、
+          已跌破/涨破突破笔端点、回撤比例（端点价差 / 突破笔振幅）超过 max_bs2_rate
+        - 第一层（bias=2）用类二笔与2类笔求交集，作为后续各层比较的"基准重叠区间"
+        - 每根满足条件的笔都登记成一个类二买卖点，层级记在特征 bsp2s_lv 里
         """
         # bias 是相对2类那笔的偏移量，步长 2 保证取到的都是与2类同向的笔；层级 lv = bias/2
         bias = 2
@@ -598,20 +498,14 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             bias += 2
 
     def cal_seg_bs3point(self, seg_list: CSegListComm[LINE_TYPE], bi_list: LINE_LIST_TYPE):
-        """
-        逐条线段算3类买卖点：T3A（中枢在1类之后）+ T3B（中枢在1类之前）。
+        """逐条线段算3类买卖点：T3A（中枢在1类之后）+ T3B（中枢在1类之前）。
 
-        Args:
-            seg_list: 线段序列
-            bi_list: 笔（或线段）序列
-
-        Note:
-            3类买卖点强依赖中枢，所以两条路径都要先拿到"参照中枢"：
-              - T3A 走 treat_bsp3_after：看下一段（next_seg）里的中枢；
-              - T3B 走 treat_bsp3_before：看本段（seg）最后一个中枢。
-            退化情形：只有一条线段时没有"下一段"也没有1类，
-            bsp1_bi 置 None —— 若 bsp3_follow_1=True（默认）会直接被跳过，
-            只有关掉 bsp3_follow_1 才会真的在这条唯一线段上找3类。
+        要点：
+        - T3A 走 treat_bsp3_after 看下一段（next_seg）里的中枢；
+          T3B 走 treat_bsp3_before 看本段最后一个中枢
+        - 退化情形：只有一条线段时没有"下一段"也没有1类，bsp1_bi 置 None ——
+          bsp3_follow_1=True（默认）会直接跳过，只有关掉它才会在唯一那条线段上找3类
+        - bsp3_follow_1 还要求1类那笔上真有已入库的买卖点
         """
         for seg in seg_list[self.last_sure_seg_idx:]:
             if not self.seg_need_cal(seg):
@@ -649,27 +543,16 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         bsp1_bi_idx,
         next_seg_idx
     ):
-        """
-        3A 类买卖点（T3A）：中枢在1类"之后" —— 下一段里的中枢被突破后，回抽不回中枢的那一笔。
+        """3A 类买卖点（T3A）：中枢在1类"之后" —— 下一段里的中枢被突破后，回抽不回中枢的那一笔。
 
-        Args:
-            seg_list: 线段序列
-            next_seg: 1类所在线段的下一段（只有一条线段时退化成它自己）
-            BSP_CONF: 该方向（买/卖）的配置
-            bi_list: 笔（或线段）序列
-            real_bsp1: 对应的1类买卖点
-            bsp1_bi_idx: 1类那根笔的 idx
-            next_seg_idx: 下一段的预期下标
-
-        Note:
-            判定链条（任一环不满足就跳过这个中枢，继续看下一个）：
-              1) 下一段里必须有"非一笔中枢"；
-              2) strict_bsp3 时要求该中枢的进笔正好是1类那笔的后一根（中枢必须紧贴1类）；
-              3) 只考察前 bsp3a_max_zs_cnt 个中枢，且中枢必须有出笔、出笔之后还得有笔；
-              4) 回抽笔（中枢出笔的下一根）要与下一段反向，且归属检查通过；
-              5) 回抽笔不能又回到中枢区间里（bsp3_back2zs）—— 这是3类的核心定义；
-              6) bsp3_peak 打开时还要求它突破中枢极值（bsp3_break_zspeak）。
-            特征里记了中枢相对高度 (high-low)/low 与回抽笔振幅。
+        要点：
+        - 前置：下一段里必须有非一笔中枢；strict_bsp3 时还要求该中枢的进笔正好是1类那笔的后一根
+        - 只考察前 bsp3a_max_zs_cnt 个中枢，且中枢得有出笔、出笔之后还得有笔（否则拿不到回抽笔）
+        - 回抽笔（中枢出笔的下一根）必须与下一段反向，且归属检查通过：
+          没归属线段时只容忍"下一段就是最后一段"，落到别的段上时只容忍那个段还不足 3 根笔
+        - 回抽笔又回到中枢区间里（bsp3_back2zs）就不算3类，换下一个中枢再看 —— 这是3类的核心定义
+        - bsp3_peak 打开时还要求它突破中枢极值（bsp3_break_zspeak）
+        - 特征记中枢相对高度 (high-low)/low 与回抽笔振幅
         """
         first_zs = next_seg.get_first_multi_bi_zs()
         if first_zs is None:
@@ -725,24 +608,14 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         real_bsp1,
         next_seg_idx
     ):
-        """
-        3B 类买卖点（T3B）：中枢在1类"之前" —— 本段最后一个中枢之后的回抽笔。
+        """3B 类买卖点（T3B）：中枢在1类"之前" —— 本段最后一个中枢之后的回抽笔。
 
-        Args:
-            seg_list: 线段序列
-            seg: 1类所在的线段，参照中枢取自它（本段最后一个非一笔中枢）
-            next_seg: 下一条线段，用来确定回抽笔的考察上界；None 表示没有下一段
-            bsp1_bi: 1类那根笔；为 None 时直接放弃（没有1类就无从谈起3类）
-            BSP_CONF: 该方向（买/卖）的配置
-            bi_list: 笔（或线段）序列
-            real_bsp1: 对应的1类买卖点
-            next_seg_idx: 下一段的预期下标
-
-        Note:
-            与 T3A 的区别：这里的中枢在1类之前，回抽笔从1类那笔之后隔一根开始找
-            （步长 2 => 取的都是与1类同向的笔），上界由 cal_bsp3_bi_end_idx(next_seg) 给出，
-            并且只取第一个满足条件的笔（命中即 break）。
-            另外这里没有 T3A 那道 bsp3_peak（突破中枢极值）门槛。
+        要点：
+        - 参照中枢取本段最后一个非一笔中枢；bsp1_bi 为 None 时直接放弃
+        - strict_bsp3 时要求该中枢的出笔正好是1类那笔
+        - 回抽笔从1类那笔之后隔一根开始找（步长 2，取到的都是与1类同向的笔），
+          上界由 cal_bsp3_bi_end_idx(next_seg) 给出
+        - 与 T3A 的两点区别：只取第一个满足条件的笔（命中即 break）；没有 bsp3_peak 那道门槛
         """
         cmp_zs = seg.get_final_multi_bi_zs()
         if cmp_zs is None:
@@ -773,27 +646,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             break
 
     def getSortedBspList(self) -> List[CBS_Point[LINE_TYPE]]:
-        """
-        取全部买卖点，按时间（笔 idx 升序）排好序。
+        """取全部买卖点，按时间（笔 idx 升序）排好序。
 
-        Returns:
-            List[CBS_Point]: 从旧到新的买卖点列表
-
-        Note:
-            bsp_iter() 是按类型分桶产出的，顺序没有时间含义，所以这里必须再排一次序。
+        要点：
+        - bsp_iter() 是按类型分桶产出的，顺序没有时间含义，所以这里必须再排一次
         """
         return sorted(self.bsp_iter(), key=lambda bsp: bsp.bi.idx)
 
     def get_latest_bsp(self, number: int) -> List[CBS_Point[LINE_TYPE]]:
-        """
-        取最近的若干个买卖点。
-
-        Args:
-            number: 要取几个；0 表示取全部
-
-        Returns:
-            List[CBS_Point]: 从最新到最旧排序的买卖点列表（最多 number 个）
-        """
+        """取最近的若干个买卖点（从最新到最旧，最多 number 个；number=0 表示取全部）。"""
         res = []
         for bsp in self.bsp_iter_v2():
             res.append(bsp)
@@ -803,75 +664,47 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
 
 
 def bsp2s_break_bsp1(bsp2s_bi: LINE_TYPE, bsp2_break_bi: LINE_TYPE) -> bool:
-    """
-    判断类二那笔是否已经"跌破/涨破"了突破笔的端点。
+    """判断类二那笔是否已经"跌破/涨破"了突破笔的端点：是则说明走成新一轮趋势，应停止继续找类二。
 
-    Args:
-        bsp2s_bi: 待判定的类二笔
-        bsp2_break_bi: 1类后面那根突破笔
-
-    Returns:
-        bool: True 表示已经破掉端点 —— 那是新一轮趋势而不是回撤，应停止继续往后找类二
-
-    Note:
-        向下笔比最低点、向上笔比最高点；都不取绝对值，方向语义由 is_down/is_up 保证。
+    要点：
+    - 向下笔比最低点、向上笔比最高点，方向语义由 is_down/is_up 保证
     """
     return (bsp2s_bi.is_down() and bsp2s_bi._low() < bsp2_break_bi._low()) or \
            (bsp2s_bi.is_up() and bsp2s_bi._high() > bsp2_break_bi._high())
 
 
 def bsp3_back2zs(bsp3_bi: LINE_TYPE, zs: CZS) -> bool:
-    """
-    判断回抽笔是否又回到了中枢区间里（3类买卖点的核心否决条件）。
+    """判断回抽笔是否又回到了中枢区间里：是则该笔不构成3类买卖点（3类的核心否决条件）。
 
-    Args:
-        bsp3_bi: 回抽笔
-        zs: 参照中枢
-
-    Returns:
-        bool: True 表示"回到中枢里"，该笔不构成3类买卖点
-
-    Note:
-        门槛刻意不对称：向下笔只要最低点还没站上中枢上沿（low < zs.high）就算回了中枢，
-        向上笔只要最高点还没跌破中枢下沿（high > zs.low）就算 —— 这正是缠论里
-        "3买/3卖要求次级别回抽不触及中枢区间"的判定。
+    要点：
+    - 门槛刻意不对称：向下笔只要最低点还没站上中枢上沿（low < zs.high）就算回了中枢，
+      向上笔只要最高点还没跌破中枢下沿（high > zs.low）就算
+    - 这正是缠论里"3买/3卖要求次级别回抽不触及中枢区间"的判定
     """
     return (bsp3_bi.is_down() and bsp3_bi._low() < zs.high) or (bsp3_bi.is_up() and bsp3_bi._high() > zs.low)
 
 
 def bsp3_break_zspeak(bsp3_bi: LINE_TYPE, zs: CZS) -> bool:
-    """
-    判断这一笔是否突破了中枢的"极值区间"（peak_low/peak_high，比中枢区间 [low, high] 更宽）。
+    """判断是否突破了中枢的"极值区间"（peak_low/peak_high，比中枢区间 [low, high] 更宽）。
 
-    Args:
-        bsp3_bi: 待判定的笔
-        zs: 参照中枢
-
-    Returns:
-        bool: True 表示突破（向下笔的起点不低于中枢最高点 / 向上笔的起点不高于中枢最低点）
-
-    Note:
-        这是 bsp3_peak 打开时附加在 T3A 上的门槛：它要求回抽笔"从中枢另一侧之外出发"，
-        即整段回抽都发生在中枢的一侧，属于更强势的3类。用 >= / <= 是允许端点相接。
+    要点：
+    - 判据是笔的起点：向下笔的起点不低于中枢最高点、向上笔的起点不高于中枢最低点；用 >= / <= 允许端点相接
+    - 这是 bsp3_peak 打开时附加在 T3A 上的门槛：要求回抽笔"从中枢另一侧之外出发"，
+      即整段回抽都发生在中枢的一侧，属于更强势的3类
     """
     return (bsp3_bi.is_down() and bsp3_bi._high() >= zs.peak_high) or (bsp3_bi.is_up() and bsp3_bi._low() <= zs.peak_low)
 
 
 def cal_bsp3_bi_end_idx(seg: Optional[CSeg[LINE_TYPE]]):
-    """
-    算 T3B 回抽笔的考察上界（笔 idx）。
+    """算 T3B 回抽笔的考察上界（笔 idx，含），返回 int 或 float("inf")。
 
-    Args:
-        seg: 下一条线段；None 表示当前段已经是最后一段
-
-    Returns:
-        int 或 float("inf")：回抽笔 idx 的上界（含）；inf 表示不限制
-
-    Note:
-        两种"不限制"的情形：没有下一段；下一段还没有非一笔中枢、且它自己是最后一段
-        （此时中枢还没走出来，任何有限上界都会误伤）。
-        否则默认上界是"下一段终笔的前一根笔"，再按下一段里第一个有出笔的中枢把上界
-        收紧到该中枢的出笔 —— 意思是"中枢被突破之后的回抽"才可能是3B。
+    要点：
+    - 两种"不限制"（返回 inf）：没有下一段；下一段还没有非一笔中枢且它自己是最后一段
+      （此时中枢还没走出来，任何有限上界都会误伤）
+    - 否则默认上界是"下一段终笔的前一根"（终笔与线段同向，不可能是回抽笔），
+      再按下一段里第一个有出笔的中枢把上界收紧到该中枢的出笔
+      —— 意思是"中枢被突破之后的回抽"才可能是3B
+    - 一笔中枢没有进/出结构，收紧时跳过
     """
     if not seg:
         return float("inf")

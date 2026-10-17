@@ -1,5 +1,5 @@
 """
-背驰自动判断 — 基于 newchan 缠论笔对象 CBi 的 MACD 面积 + RSI/KDJ 背离检测。
+背驰自动判断 — 基于 chan 缠论笔对象 CBi 的 MACD 面积 + RSI/KDJ 背离检测。
 
 改写说明（原实现基于 ``chanlun.elements.Bi``）：
     ``Bi`` 是纯数据模型，一根笔只有 ``start`` / ``end`` 两个日期，要取区间数据只能
@@ -12,7 +12,7 @@
 
 关键约定：
     1. 笔的区间以 ``get_begin_klu()`` / ``get_end_klu()`` 的 **KLU idx 闭区间**为准，
-       这与 newchan 自己算背驰（``CBi.Cal_MACD_area``）用的是同一套边界；
+       这与 chan 自己算背驰（``CBi.Cal_MACD_area``）用的是同一套边界；
     2. ``self.df`` 的行位置 = KLU idx - idx_offset。idx_offset 默认 0，即「喂进来的 df
        就是参与缠论计算的那段完整行情」；若只喂了尾部窗口（如 ``df.tail(200)``），
        必须显式传 offset（= 全历史根数 - 窗口根数），否则整体错位一个<｜hy_place▁holder▁no▁813｜>；
@@ -147,19 +147,19 @@ def _bi_klu_list(bi: CBi) -> list:
 
 
 def _bi_high(bi: CBi) -> float:
-    """笔区间最高价（等价于旧 Bi.high；newchan 里由 ``CBi._high()`` 给出）"""
+    """笔区间最高价（等价于旧 Bi.high；chan 里由 ``CBi._high()`` 给出）"""
     return float(bi._high())
 
 
 def _bi_low(bi: CBi) -> float:
-    """笔区间最低价（等价于旧 Bi.low；newchan 里由 ``CBi._low()`` 给出）"""
+    """笔区间最低价（等价于旧 Bi.low；chan 里由 ``CBi._low()`` 给出）"""
     return float(bi._low())
 
 
 def _bi_end_idx(bi: CBi) -> int:
     """笔终点 KLU 的下标，用作「谁更靠近当下」的比较键（等价旧 Bi.end 的时间先后）。"""
     idx = bi.get_end_klu().idx
-    # idx 未分配时 newchan 会留 -1，这里兜成 0 避免比较出负数
+    # idx 未分配时 chan 会留 -1，这里兜成 0 避免比较出负数
     return idx if isinstance(idx, int) and idx >= 0 else 0
 
 
@@ -201,7 +201,7 @@ class DivergenceDetector:
         顶、底同时满足时取概率更高者；概率相同则取第二段结束时间更晚者。
 
         Args:
-            bis: newchan 的笔列表（``chan[lv].bi_list`` 迭代出来的 CBi）。
+            bis: chan 的笔列表（``chan[lv].bi_list`` 迭代出来的 CBi）。
 
         Note:
             这里同时收录确认笔与虚笔，与原实现一致 —— 虚笔虽然可能被后续走势改写，
@@ -271,7 +271,7 @@ class DivergenceDetector:
 
     def _klu_metric_series(self, bi: CBi, kind: str) -> Optional[pd.Series]:
         """
-        从笔自身的 KLU 上取由 newchan 引擎算好的指标序列。
+        从笔自身的 KLU 上取由 chan 引擎算好的指标序列。
 
         Args:
             bi: 缠论笔

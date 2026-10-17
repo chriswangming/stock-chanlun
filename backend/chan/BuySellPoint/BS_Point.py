@@ -44,17 +44,13 @@ class CBS_Point(Generic[LINE_TYPE]):
     """
 
     def __init__(self, bi: LINE_TYPE, is_buy, bs_type: BSP_TYPE, relate_bsp1: Optional['CBS_Point'], feature_dict=None):
-        """
-        Args:
-            bi: 买卖点所在的那根笔/线段，买卖点的时间与价格都由它的尾端点决定
-            is_buy: True 表示这是买点
-            bs_type: 首次登记的类型（BSP_TYPE），后续类型由 add_type 追加
-            relate_bsp1: 对应的1类买卖点；2/3类买卖点靠它串联成"一买-二买-三买"链条
-            feature_dict: 初始特征字典，None 则先建空特征表（由 CFeatures 处理）
+        """造一个买卖点并挂到所在笔/线段上。
 
-        Note:
-            构造末尾会调 init_common_feature() 补上所有买卖点共有的特征，
-            因此 feature_dict 只需给出"本类买卖点特有"的那部分。
+        要点：
+        - klu 取笔尾端造出极值的那根K线，买卖点的时间与价格都以它为准
+        - type 是列表，构造时只装首个类型，后续类型由 add_type / add_another_bsp_prop 追加
+        - 构造时会把 self 反向写回 bi.bsp，"一根笔至多一个买卖点实例"由 BSPointList.add_bs 保证
+        - 末尾自动调 init_common_feature() 补通用特征，所以 feature_dict 只给本类专属的那部分即可
         """
         self.bi: LINE_TYPE = bi
         self.klu = bi.get_end_klu()
@@ -71,39 +67,20 @@ class CBS_Point(Generic[LINE_TYPE]):
         self.init_common_feature()
 
     def add_type(self, bs_type: BSP_TYPE):
-        """
-        追加一个买卖点类型。
-
-        Args:
-            bs_type: 要叠加的类型（BSP_TYPE）
-
-        Note:
-            同一根笔可能同时满足多类买卖点的定义（例如1买的那一笔同时也是2买），
-            这时不新建对象，而是把新类型并入 self.type，保证"一根笔一个买卖点实例"。
-        """
+        """追加一个买卖点类型：同一根笔可同时命中多类，只并类型不新建对象。"""
         self.type.append(bs_type)
 
     def type2str(self):
-        """
-        把类型列表拼成人可读的字符串，供打印/绘图标注使用。
-
-        Returns:
-            str: 逗号分隔的类型值，如 "1,2"；顺序与 type 列表一致（先判定的在前）
-        """
+        """把类型列表拼成逗号分隔字符串（如 "1,2"），供打印/绘图标注，顺序与 type 一致。"""
         return ",".join([x.value for x in self.type])
 
     def add_another_bsp_prop(self, bs_type: BSP_TYPE, relate_bsp1):
-        """
-        在已有买卖点上叠加"另一个类型"及其对应的1类买卖点。
+        """叠加一个新类型，并把该类型对应的1类买卖点合并进来。
 
-        Args:
-            bs_type: 新叠加的类型
-            relate_bsp1: 新类型对应的1类买卖点，可以是 None（1类自身就是 None）
-
-        Note:
-            relate_bsp1 的合并规则：自己没有就直接用对方的；两边都有则必须指向
-            同一根K线（否则说明这个买卖点被两条不同的1类链条同时认领，属于逻辑冲突）。
-            只对 relate_bsp1 做校验、不覆盖，是因为先登记的类型更"根"，不应被后来的改写。
+        要点：
+        - relate_bsp1 只补不覆盖：自己没有就用对方的，两边都有则必须指向同一根K线
+        - 两边都非 None 却不同K线，说明这个买卖点被两条不同的1类链条同时认领，属逻辑冲突
+        - 不覆盖是因为先登记的类型更"根"，不应被后来的类型改写
         """
         self.add_type(bs_type)
         if self.relate_bsp1 is None:
@@ -112,27 +89,16 @@ class CBS_Point(Generic[LINE_TYPE]):
             assert self.relate_bsp1.klu.idx == relate_bsp1.klu.idx
 
     def add_feat(self, inp1: Union[str, Dict[str, float], Dict[str, Optional[float]], 'CFeatures'], inp2: Optional[float] = None):
-        """
-        往特征表里塞一条（或一批）特征。
+        """往特征表里写一条（传特征名+值）或一批（传 dict / 另一个 CFeatures）特征。
 
-        Args:
-            inp1: 特征名，或一批特征（dict / 另一个 CFeatures）
-            inp2: 单个特征的值；为 None 时表示 inp1 是批量输入
-
-        Note:
-            同名特征后写覆盖先写，所以"通用特征 + 本类专属特征"可以分两次 add_feat
-            而不必担心键冲突（实际实现委托给 CFeatures.add_feat）。
+        要点：
+        - 单条写法的第二个参数省略就按批量合并处理
+        - 同名特征后写覆盖先写，所以"通用特征 + 本类专属特征"可以分两次写而不必担心键冲突
         """
         self.features.add_feat(inp1, inp2)
 
     def init_common_feature(self):
-        """
-        补上"所有买卖点都该有"的通用特征，构造时自动调用一次。
-
-        Note:
-            目前只有 bsp_bi_amp（所在笔的振幅），它是与买卖点类型无关的量，
-            放这里可以避免每类买卖点的判定函数都重复写一遍。
-        """
+        """补上与买卖点类型无关的通用特征（目前只有所在笔振幅 bsp_bi_amp），构造时自动调一次。"""
         # 用于配置适用所有买卖点的特征
         self.add_feat({
             'bsp_bi_amp': self.bi.amp(),

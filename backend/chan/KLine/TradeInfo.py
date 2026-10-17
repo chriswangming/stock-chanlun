@@ -1,8 +1,10 @@
-# 单根K线的附属交易信息（成交量、成交额、换手率等）容器。
-#
-# 在计算链路中的位置：CKLine_Unit -> CTradeInfo。
-# 它是"只读旁路"数据：由数据源给的原始 dict 抽取而来，挂在 klu.trade_info 上，
-# 供后续指标计算、选股逻辑和画图展示使用，不参与包含处理、分型、笔/线段等核心运算。
+"""
+单根K线的附属交易信息（成交量、成交额、换手率等）容器。
+
+链路位置：CKLine_Unit -> CTradeInfo。
+它是"只读旁路"数据：由数据源给的原始 dict 抽取而来，挂在 klu.trade_info 上，
+供后续指标计算、选股逻辑和画图展示使用，不参与包含处理、分型、笔/线段等核心运算。
+"""
 from typing import Dict, Optional
 
 from ..Common.CEnum import TRADE_INFO_LST
@@ -18,6 +20,8 @@ class CTradeInfo:
 
     def __init__(self, info: Dict[str, float]):
         """
+        从原始K线 dict 中抽取成交类字段，缺失的补 None。
+
         Args:
             info: 数据源给出的原始K线 dict，key 为 TRADE_INFO_LST 中的枚举值
 

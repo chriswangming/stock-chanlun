@@ -32,6 +32,8 @@ from utils import (
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """启动时恢复 AI 模型并清理各缓存的过期项；yield 之后（关停）不做额外处理。
+    """
     apply_startup_ai_model()
     chanlun_cache.purge_expired()
     chanlun_multi_cache.purge_expired()

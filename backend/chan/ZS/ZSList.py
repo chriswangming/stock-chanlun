@@ -1,19 +1,15 @@
 """
 中枢列表（ZSList）模块：决定"哪些笔/线段该构成一个中枢、中枢要不要合并"。
 
-CZSList 维护一个中枢序列，逐个把元素（笔或线段）喂进来：
-    1. 先试着并入上一个中枢（中枢延伸）；
-    2. 并入失败就攒在 free_item_lst 里，攒够 2~3 个再试着构造一个新中枢；
-    3. 新中枢成型后，再按配置尝试和前一个中枢合并（中枢扩展/扩展成更大级别）。
+链路位置：原始K线 -> 包含合并 -> 分型 -> 笔 -> 线段 -> 【本模块：中枢列表】 -> 买卖点
 
-链路位置：
-    原始K线 -> 包含合并 -> 分型 -> 笔 -> 线段 -> 【本模块：中枢列表】 -> 买卖点
-
-Note:
-    单个中枢的计算在 ZS/ZS.py，本模块只负责"构造与合并"的决策。
-    两种构造模式由 zs_algo 决定：
-        normal  ：按线段一段一段地扫（中枢不跨线段）；
-        over_seg：允许中枢跨线段（此时要求关闭一笔中枢）。
+要点：
+- CZSList 维护一个中枢序列，逐个把元素（笔或线段）喂进来：先试着并入上一个中枢（中枢延伸），
+  并入失败就攒在 free_item_lst 里，攒够 2~3 个再试着构造新中枢，
+  新中枢成型后再按配置尝试和前一个中枢合并。
+- 单个中枢的计算在 ZS/ZS.py，本模块只负责"构造与合并"的决策。
+- 构造模式由 zs_algo 决定：normal 按线段一段一段地扫（中枢不跨线段）；
+  over_seg 允许中枢跨线段（此时要求关闭一笔中枢）。
 """
 from typing import List, Union, overload
 
@@ -40,10 +36,7 @@ class CZSList:
     """
 
     def __init__(self, zs_config=CZSConfig()):
-        """
-        Args:
-            zs_config: 中枢配置 CZSConfig
-        """
+        """zs_config 是中枢配置 CZSConfig（是否合并、合并口径、是否允许一笔中枢、构造模式）。"""
         self.zs_lst: List[CZS] = []
 
         self.config = zs_config
@@ -56,13 +49,9 @@ class CZSList:
         """
         把增量游标推进到"最后一个确认线段"的位置。
 
-        Args:
-            seg_list: 线段列表
-
-        Note:
-            从后往前找第一个确认线段，把它的 idx 记为 last_seg_idx、
-            起始笔 idx 记为 last_sure_pos；一个确认线段都没有时两者分别是 0 与 -1。
-            重算时只看比它更新的部分。
+        要点：
+        - 从后往前找第一个确认线段，把它的 idx 记为 last_seg_idx、起始笔 idx 记为 last_sure_pos。
+        - 一个确认线段都没有时，两者回落到 0 与 -1；重算时只看比游标更新的部分。
         """
         self.last_sure_pos = -1
         self.last_seg_idx = 0
@@ -76,30 +65,18 @@ class CZSList:
             _seg_idx -= 1
 
     def seg_need_cal(self, seg: CSeg):
-        """
-        判断这条线段是否还需要参与本次重算。
-
-        Args:
-            seg: 待判断的线段
-
-        Returns:
-            bool: 起点还在游标之后（含）才需要重算
-        """
+        """判断这条线段是否还需要参与本次重算（起点还在游标之后，含游标位置）。"""
         return seg.start_bi.idx >= self.last_sure_pos
 
     def add_to_free_lst(self, item, is_sure, zs_algo):
         """
-        把一个元素塞进"待构造"列表，够条件就构造一个新中枢。
+        把一个元素塞进"待构造"列表，够条件就构造一个新中枢并入列。
 
-        Args:
-            item: 新来的元素（笔或线段）
-            is_sure: 它是否是确认元素（决定构造出来的中枢是不是确认中枢）
-            zs_algo: 构造模式，'normal' 或 'over_seg'
-
-        Note:
-            开头那个替换动作是为了防止"笔的尾部被更新（新高/新低）"时
-            同一个下标的元素被重复塞进来。
-            构造成功后，第一笔不能是中枢的起点（否则"进中枢的那一笔"不存在）。
+        要点：
+        - 开头那个替换动作是为了防止"笔的尾部被更新（新高/新低）"时
+          同一个下标的元素被重复塞进来。
+        - 构造成功后还要满足"起点不是第 0 号元素"，否则找不到"进入中枢的那一笔"。
+        - 入列后会清空待构造列表，并立即尝试与前一个中枢合并。
         """
         if len(self.free_item_lst) != 0 and item.idx == self.free_item_lst[-1].idx:
             # 防止笔新高或新低的更新带来bug
@@ -120,13 +97,11 @@ class CZSList:
         """
         喂进一个元素：先尝试中枢延伸，不行再攒着等构造新中枢。
 
-        Args:
-            bi: 新来的元素（笔或线段）
-            is_sure: 它是否是确认元素
-
-        Note:
-            只有当"待构造列表为空"时才尝试延伸，
-            否则新元素可能会越过待构造列表直接并入上一个中枢。
+        要点：
+        - 只有当"待构造列表为空"时才尝试延伸，
+          否则新元素可能会越过待构造列表直接并入上一个中枢。
+        - 延伸成功后会立刻尝试合并（zs_combine_mode='peak' 时才会真正生效，
+          'zs' 口径下两个相邻中枢必然不重叠，一定返回无效）。
         """
         if len(self.free_item_lst) == 0 and self.try_add_to_end(bi):
             # zs_combine_mode=peak合并模式下会触发生效，=zs合并一定无效返回
@@ -135,31 +110,18 @@ class CZSList:
         self.add_to_free_lst(bi, is_sure, "normal")
 
     def try_add_to_end(self, bi):
-        """
-        尝试让新元素直接并入最后一个中枢（中枢延伸）。
-
-        Args:
-            bi: 新来的元素（笔或线段）
-
-        Returns:
-            bool: 并入成功则为 True
-        """
+        """尝试让新元素直接并入最后一个中枢（中枢延伸）；还没有中枢时恒为 False。"""
         return False if len(self.zs_lst) == 0 else self[-1].try_add_to_end(bi)
 
     def add_zs_from_bi_range(self, seg_bi_lst: list, seg_dir, seg_is_sure):
         """
         把一个线段区间内的元素逐个喂进来，构造该线段内的中枢。
 
-        Args:
-            seg_bi_lst: 本线段包含的元素（笔）
-            seg_dir: 线段方向
-            seg_is_sure: 线段是否确认
-
-        Note:
-            与线段同向的元素会被跳过：中枢是由"相邻反向元素"的区间重叠构成的，
-            同向的那些元素已经算在中枢内部了。
-            第一个元素直接进"待构造"列表，之后的才走 update（可延伸可构造），
-            这是为了防止延伸动作跨到上一条线段的中枢里去。
+        要点：
+        - 与线段同向的元素会被跳过：中枢由"相邻反向元素"的区间重叠构成，
+          同向的那些元素已经算在中枢内部了。
+        - 第一个元素直接进"待构造"列表，之后的才走 update（可延伸可构造），
+          这是为了防止延伸动作跨到上一条线段的中枢里去。
         """
         deal_bi_cnt = 0
         for bi in seg_bi_lst:
@@ -175,20 +137,16 @@ class CZSList:
 
     def try_construct_zs(self, lst, is_sure, zs_algo):
         """
-        用攒下来的元素试着构造一个中枢。
+        用攒下来的元素试着构造一个中枢，重叠不成立时返回 None。
 
-        Args:
-            lst: 待构造列表里的元素
-            is_sure: 构造出来的中枢是否是确认中枢
-            zs_algo: 'normal' 取末尾 2 个（或 1 个，允许一笔中枢时）元素构造；
-                     'over_seg' 取末尾 3 个元素构造
-
-        Returns:
-            Optional[CZS]: 构造成功返回新中枢，否则返回 None
-
-        Note:
-            最终的交集检查是 has_overlap 的另一种写法：
-            min(各元素高点) > max(各元素低点) 才说明它们真的有重叠。
+        要点：
+        - zs_algo='normal'：不允许一笔中枢时取末尾 2 个元素构造（只有 1 个则放弃），
+          允许一笔中枢时 1 个元素也构造（这就是一笔中枢）。
+        - zs_algo='over_seg'：取末尾 3 个元素构造；若最旧那根与它所属线段同向
+          （说明它是段内的同向笔、这三根跨了线段），本次直接放弃构造
+          （lst 只是局部变量重绑，不会真的把它从待构造列表里去掉）。
+        - 最终的交集检查是 has_overlap 的另一种写法：
+          min(各元素高点) > max(各元素低点) 才说明它们真的有重叠。
         """
         if zs_algo == "normal":
             if not self.config.one_bi_zs:
@@ -211,22 +169,16 @@ class CZSList:
 
     def cal_bi_zs(self, bi_lst: Union[CBiList, CSegListComm], seg_lst: CSegListComm):
         """
-        重算中枢列表的总入口。
+        重算中枢列表的总入口（bi_lst 是本层元素列表，seg_lst 是上层线段列表）。
 
-        Args:
-            bi_lst: 本层的元素列表（笔列表或线段列表）
-            seg_lst: 上层的线段列表（用于按段扫描、以及增量游标）
-
-        Raises:
-            Exception: zs_algo 配置的取值不合法
-
-        Note:
-            开头先把"起点还在游标之后"的最新中枢撤掉（它们会被重新算出来）。
-            三种模式：
-                normal  ：按线段逐段扫，段与段之间清空待构造列表，
-                          最后再单独处理"还没成线段"的那截元素；
-                over_seg：不按线段，直接从上次位置往后扫，允许中枢跨线段；
-                auto    ：有确认线段时按段扫，一旦遇到未确认线段就切成 over_seg 模式。
+        要点：
+        - 开头先把"起点还在游标之后"的最新中枢撤掉（它们会被重新算出来）。
+        - normal  ：按线段逐段扫，段与段之间清空待构造列表，
+                    最后再单独处理"还没成线段"的那截元素；
+        - over_seg：不按线段，直接从上次位置往后扫，允许中枢跨线段（要求关掉一笔中枢）；
+        - auto    ：有确认线段时按段扫，一旦遇到未确认线段就切成 over_seg 模式；
+        - 扫完最后用 update_last_pos 把游标推到新的"最后确认线段"位置；
+          zs_algo 取其它值时抛异常。
         """
         while self.zs_lst and self.zs_lst[-1].begin_bi.idx >= self.last_sure_pos:
             self.zs_lst.pop()
@@ -275,13 +227,13 @@ class CZSList:
         """
         over_seg 模式下喂进一个元素。
 
-        Args:
-            bi: 新来的元素（笔或线段）
-
-        Note:
-            比 normal 模式多一道判断：只有当"元素与上一个中枢尾部相邻（间隔 <=1）
-            且它的下一根也还在中枢区间内"时，才允许延伸 ——
-            否则会造出跨度过大的中枢。
+        要点：
+        - 比 normal 模式多两道判断（都只在"待构造列表为空"时才考虑）：
+            1) 元素与上一个中枢尾部相邻（间隔 <=1）且它的下一根也还在中枢区间内，
+               才允许直接延伸，否则会造出跨度过大的中枢；
+            2) 元素本身就在中枢区间内且相邻，说明它已被中枢覆盖，直接跳过。
+        - 最新那根元素还没有下一根时无法判断，先不处理。
+        - 其余情况一律交给 add_to_free_lst，由 try_construct_zs 的 3 元素规则处理。
         """
         if len(self.zs_lst) and len(self.free_item_lst) == 0:
             if bi.next is None:
@@ -298,7 +250,7 @@ class CZSList:
         yield from self.zs_lst
 
     def __len__(self):
-        """Returns: int: 中枢的个数。"""
+        """中枢的个数。"""
         return len(self.zs_lst)
 
     # 下面三个 __getitem__ 组成一组重载：带 @overload 的两个只在类型检查阶段生效，
@@ -310,24 +262,16 @@ class CZSList:
     def __getitem__(self, index: slice) -> List[CZS]: ...
 
     def __getitem__(self, index: Union[slice, int]) -> Union[List[CZS], CZS]:
-        """
-        按下标/切片取中枢。
-
-        Args:
-            index: int 或 slice
-
-        Returns:
-            CZS 或 List[CZS]
-        """
+        """按下标取一个中枢，按切片取中枢列表。"""
         return self.zs_lst[index]
 
     def try_combine(self):
         """
         尝试把最后两个中枢合并（中枢的扩展/合并）。
 
-        Note:
-            合并成功后被吃掉的是"后面那个"，所以要把 zs_lst 的尾部删掉一个；
-            用 while 是因为合并完可能又能和更前面的中枢合并，要一路并上去。
+        要点：
+        - 合并成功后被吃掉的是"后面那个"，所以要把 zs_lst 的尾部删掉一个。
+        - 用 while 是因为合并完可能又能和更前面的中枢合并，要一路并上去。
         """
         if not self.config.need_combine:
             return

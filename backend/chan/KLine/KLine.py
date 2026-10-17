@@ -1,10 +1,12 @@
-# 合并后的K线 CKLine（简称 KLC）。
-#
-# 链路位置：CKLine_Unit（单根原始K线） -> CKLine（做包含关系处理，把若干根同方向 KLU 并成一根） -> CKLine_List（某级别整段序列）。
-#
-# 它承上启下：
-#   向上给 CKLine_List 提供用于判笔的材料（分型 fx、能否成笔 check_fx_valid、是否为跳空 has_gap_with_next）；
-#   包含处理本身、区间端点定位（get_peak_klu）等能力继承自 CKLine_Combiner。
+"""
+合并后的K线 CKLine（简称 KLC）模块。
+
+链路位置：CKLine_Unit（单根原始K线） -> CKLine（做包含关系处理，把若干根同方向 KLU 并成一根） -> CKLine_List（某级别整段序列）。
+
+它承上启下：
+    向上给 CKLine_List 提供用于判笔的材料（分型 fx、能否成笔 check_fx_valid、是否为跳空 has_gap_with_next）；
+    包含处理本身、区间端点定位（get_peak_klu）等能力继承自 CKLine_Combiner。
+"""
 from ..Combiner.KLine_Combiner import CKLine_Combiner
 from ..Common.CEnum import FX_CHECK_METHOD, FX_TYPE, KLINE_DIR
 from ..Common.ChanException import CChanException, ErrCode
@@ -12,7 +14,6 @@ from ..Common.func_util import has_overlap
 from ..KLine.KLine_Unit import CKLine_Unit
 
 
-# 合并后的K线
 class CKLine(CKLine_Combiner[CKLine_Unit]):
     """
     包含处理后的单根合并K线，是判分型、判笔的基本单位。
@@ -27,6 +28,8 @@ class CKLine(CKLine_Combiner[CKLine_Unit]):
 
     def __init__(self, kl_unit: CKLine_Unit, idx, _dir=KLINE_DIR.UP):
         """
+        以一根原始K线为起点，开出本级别的一根新合并K线。
+
         Args:
             kl_unit: 作为本 KLC 第一根成员的原始K线
             idx: 本 KLC 在 CKLine_List 中的下标
@@ -43,9 +46,10 @@ class CKLine(CKLine_Combiner[CKLine_Unit]):
 
     def __str__(self):
         """
+        调试输出一行摘要："序号th[分型标记]:起~止(级别|含几根原始K线) low=.. high=.."。
+
         Returns:
-            str: "序号th[分型标记]:起~止(级别|含几根原始K线) low=.. high=.."，
-                顶分型标记为 ^、底分型标记为 _，无分型时为空。
+            str: 顶分型标记为 ^、底分型标记为 _，无分型时为空。
         """
         fx_token = ""
         if self.fx == FX_TYPE.TOP:
@@ -77,6 +81,8 @@ class CKLine(CKLine_Combiner[CKLine_Unit]):
 
     def get_klu_max_high(self) -> float:
         """
+        返回本 KLC 内所有原始K线的最高价的最大值。
+
         Returns:
             float: 本 KLC 内所有原始K线的最高价的最大值。
 
@@ -88,10 +94,7 @@ class CKLine(CKLine_Combiner[CKLine_Unit]):
         return max(x.high for x in self.lst)
 
     def get_klu_min_low(self) -> float:
-        """
-        Returns:
-            float: 本 KLC 内所有原始K线的最低价的最小值（理由同 get_klu_max_high）。
-        """
+        """返回本 KLC 内所有原始K线的最低价的最小值（理由同 get_klu_max_high）。"""
         return min(x.low for x in self.lst)
 
     def has_gap_with_next(self) -> bool:

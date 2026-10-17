@@ -19,6 +19,8 @@ from utils import (
 def client_ip(request: Request) -> str:
     # 仅在可信反向代理之后（TRUST_X_FORWARDED_FOR=1）才信任 XFF 头，
     # 否则客户端可伪造该头绕过每 IP 限流。
+    """取客户端 IP：仅在 TRUST_X_FORWARDED_FOR 打开时才信 XFF 头，否则直接用连接地址。
+    """
     if TRUST_X_FORWARDED_FOR:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
@@ -68,6 +70,8 @@ def check_light_api_rate_limits(ip: str) -> None:
 
 
 def check_ai_diagnosis_rate_limits(ip: str) -> None:
+    """AI 诊股接口限流：全局 + 每 IP 双重，超限抛 429。
+    """
     if not ai_diagnosis_global_limiter.try_acquire("global"):
         raise HTTPException(status_code=429, detail="AI 诊股服务繁忙，请稍后重试")
     if not ai_diagnosis_ip_limiter.try_acquire(ip):

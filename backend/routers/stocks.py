@@ -1,3 +1,17 @@
+"""
+【已停用】行情与选股路由 — 当前整文件为注释状态，main.py 中也没有挂载。
+
+停用前的职责：限流 → 参数校验 → asyncio.to_thread 包装 → 出参清洗，
+取数交给 services/akshare_service.py 与 services/screening_service.py。
+
+限流分档（见 deps.py）：
+    - check_light_api_rate_limits：搜索 / 新闻 / 盘口等轻量接口
+    - check_kline_rate_limits：K 线 / 行情快照 / 导出 / 大盘概览
+    - check_screening_rate_limits：选股（最重，逐票跑缠论）
+
+两个选股入口差别很大：/screen 一次性返回，/screen-stream 是 SSE 边算边推、
+支持前端断连时提前终止。重新启用时需一并恢复 main.py 的 include_router。
+"""
 # """行情与选股 HTTP 路由。
 
 # 本层只做：限流 → 参数校验 → asyncio.to_thread 包装 → 出参清洗。

@@ -18,6 +18,8 @@ _orig_send = _req_mod.adapters.HTTPAdapter.send
 
 
 def _patched_send(adapter, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+    """requests 的猴子补丁：给行情域名强制不走代理、默认补 12s 超时，按要求可关掉 TLS 校验。
+    """
     url = getattr(request, "url", "") or ""
     if timeout is None and url:
         timeout = 12.0

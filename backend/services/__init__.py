@@ -1,1 +1,1 @@
-# Services module
+"""取数与业务服务层：A 股行情（akshare）、港股（富途 OpenD）、缠论选股。"""

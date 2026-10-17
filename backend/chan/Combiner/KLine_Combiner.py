@@ -72,41 +72,58 @@ class CKLine_Combiner(Generic[T]):
     # 以下属性都是只读的：外部想改状态必须走 try_add/update_fx/set_* 这套方法
     # 合并K线的起始时间（第一根元素的起点）
     @property
-    def time_begin(self): return self.__time_begin
+    def time_begin(self):
+        """本合并K线的起始时间（取所含第一根原始K线的时间）。"""
+        return self.__time_begin
 
     # 合并K线的结束时间（被并入的最后一根元素的终点）
     @property
-    def time_end(self): return self.__time_end
+    def time_end(self):
+        """本合并K线的结束时间（取所含最后一根原始K线的时间）。"""
+        return self.__time_end
 
     # 合并区间的高点（不是简单取 max，取决于合并方向 dir，见模块说明）
     @property
-    def high(self): return self.__high
+    def high(self):
+        """合并区间的最高价（含关系处理时向上取到的最高点）。"""
+        return self.__high
 
     # 合并区间的低点（同上）
     @property
-    def low(self): return self.__low
+    def low(self):
+        """合并区间的最低价（含关系处理时向下取到的最低点）。"""
+        return self.__low
 
     # 被合并进来的元素列表，lst[0] 是第一根、lst[-1] 是最后一根
     @property
-    def lst(self): return self.__lst
+    def lst(self):
+        """被合并进来的原始K线列表（按时间顺序）。"""
+        return self.__lst
 
     # 本合并K线的调整方向（UP/DOWN），决定后续包含合并时取「高高」还是「低低」
     @property
-    def dir(self): return self.__dir
+    def dir(self):
+        """与上一根合并K线的包含方向（UP/DOWN），用于判定包含关系该怎么合。"""
+        return self.__dir
 
     # 分型：FX_TYPE.TOP / BOTTOM / UNKNOWN，由 update_fx 判定
     @property
-    def fx(self): return self.__fx
+    def fx(self):
+        """本合并K线的分型类型（顶/底/未知），由后续分型识别写入。"""
+        return self.__fx
 
     # 前一根合并K线（第一根没有前驱，取用会断言失败）
     @property
     def pre(self) -> Self:
+        """上一根合并K线；首根没有前驱，取用会直接断言失败。"""
         assert self.__pre is not None
         return self.__pre
 
     # 后一根合并K线，还没有右侧邻居时为 None（所以不能断言非空）
     @property
-    def next(self): return self.__next
+    def next(self):
+        """下一根合并K线；行情末尾那根为 None。"""
+        return self.__next
 
     def get_next(self) -> Self:
         """取后一根合并K线，并断言它确实存在。"""

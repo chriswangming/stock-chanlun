@@ -251,6 +251,8 @@ class ConfigWithCheck:
 
     def __init__(self, conf):
         """
+        包一层待校验的配置 dict。
+
         Args:
             conf: 原始配置字典（会被就地修改：读取过的键将被删除）
         """

@@ -1,5 +1,5 @@
 """
-newchan（chan.py 内核）的**数据出口**：把缠论计算结果摊平成前端可直接消费的 JSON 结构。
+chan（chan.py 内核）的**数据出口**：把缠论计算结果摊平成前端可直接消费的 JSON 结构。
 
 ``CChan`` 算完之后，内部是一张互相引用的对象图::
 
@@ -184,7 +184,7 @@ def _serialize_klines(meta: CChanPlotMeta, rd: Optional[int], with_indicators: b
 
     Note:
         ``indicators`` 是与 ``klines`` **等长、同序**的（索引 i 对第 i 根K线），
-        直接由 newchan 的指标算子（``Math/MACD.py`` 等）在喂K线时算好，
+        直接由 chan 的指标算子（``Math/MACD.py`` 等）在喂K线时算好，
         与前端 ``utils/stockIndicators.ts`` 的 EMA 递推式同源，
         两边给同一段收盘价应当得到一致结果。
     """
@@ -386,6 +386,8 @@ def _serialize_xians(meta: CChanPlotMeta, rd: Optional[int], idx2date: Dict[int,
         或首段切分出来的残留段，前端按虚线处理。
     """
     def _one(seg_meta, prefix):
+        """把一条线段 meta 转成前端要的 JSON：含起止日期与 idx、方向、高低价、确定标记与趋势线。
+        """
         bx, ex = int(seg_meta.begin_x), int(seg_meta.end_x)
         by, ey = _json_num(seg_meta.begin_y, rd), _json_num(seg_meta.end_y, rd)
         tl = {}
@@ -463,7 +465,7 @@ def _compact_all_none(arr: List[Optional[float]]) -> Optional[List[Optional[floa
 
 def _bsp_type_cn(bsp_type: str, is_buy: bool) -> str:
     """
-    把 newchan 的买卖点类型串翻成前端展示用的中文标签。
+    把 chan 的买卖点类型串翻成前端展示用的中文标签。
 
     Args:
         bsp_type: ``CBS_Point.type2str()`` 的产物，形如 ``"1"`` / ``"1p"`` / ``"3a,2"``

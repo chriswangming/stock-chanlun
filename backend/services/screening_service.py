@@ -1,10 +1,10 @@
 """
 选股服务 — 按基础指标、缠论买卖点、MACD+SKDJ 双金叉筛选股票。
 
-缠论部分基于 newchan，但没有直接 ``new CChan(code, ..., DATA_SRC.BAO_STOCK)``，
+缠论部分基于 chan，但没有直接 ``new CChan(code, ..., DATA_SRC.BAO_STOCK)``，
 而是拆成「取数」与「计算」两步：K 线仍走 services.akshare_service.get_kline_hist
 （它内部用 _bs_lock 串行化 baostock 单一会话，可在线程池里安全并发调用），
-拿到 DataFrame 后再用 newchan 的 CKLine_List 增量推进算出笔 / 线段 / 中枢 / 买卖点
+拿到 DataFrame 后再用 chan 的 CKLine_List 增量推进算出笔 / 线段 / 中枢 / 买卖点
 （纯 CPU，不受取数锁影响，因此ThreadPoolExecutor 的并行度仍然有效）。
 
 不直接构造 CChan 的原因有两个：
@@ -57,7 +57,7 @@ _LEVEL_TO_PERIOD = {
     "monthly": "monthly",
 }
 
-# 前端级别名 → newchan 的 KL_TYPE，用于构造 CKLine_List 时标明本序列的级别语义。
+# 前端级别名 → chan 的 KL_TYPE，用于构造 CKLine_List 时标明本序列的级别语义。
 # 注意 "1min" 同样落到 K_5M：它实际取到的就是 5 分钟K线（见 _LEVEL_TO_PERIOD 的注），
 # 这里按「数据的真实周期」标注而不是按请求的级别名，否则分钟线的时间序列会被标错。
 _LEVEL_TO_KLTYPE = {
@@ -83,13 +83,13 @@ def _level_to_period(level: str) -> str:
 
 
 def _level_to_kltype(level: str) -> KL_TYPE:
-    """前端级别名 → newchan KL_TYPE；未知级别兜底日线，规则同 _level_to_period。"""
+    """前端级别名 → chan KL_TYPE；未知级别兜底日线，规则同 _level_to_period。"""
     return _LEVEL_TO_KLTYPE.get(level, KL_TYPE.K_DAY)
 
 
 def _to_ctime(ts) -> CTime:
     """
-    pandas 时间戳 → newchan 的 CTime。
+    pandas 时间戳 → chan 的 CTime。
 
     Note:
         关键在 hour/minute 的取值：CTime 的 auto 语义是「时分都为 0 时视为天级别，
@@ -101,7 +101,7 @@ def _to_ctime(ts) -> CTime:
 
 def _build_kl_list(df: pd.DataFrame, kl_type: KL_TYPE) -> CKLine_List:
     """
-    把 K 线 DataFrame 喂给 newchan，算出该级别的笔 / 线段 / 中枢 / 买卖点。
+    把 K 线 DataFrame 喂给 chan，算出该级别的笔 / 线段 / 中枢 / 买卖点。
 
     Args:
         df: 至少含 date/open/close/high/low 列、按时间升序的 K 线表。
@@ -283,6 +283,8 @@ def _normalize_code(code: str) -> str:
 
 
 def _parse_pe_pb(info: dict) -> tuple[float | None, float | None]:
+    """从股票信息里取 PE/PB；缺失、空串或 0 都算无值返回 None（0 不是有效估值）。
+    """
     pe = info.get("市盈率")
     pb = info.get("市净率")
     try:
@@ -317,6 +319,8 @@ def _quotes_from_hot(hot_list: list[dict]) -> dict[str, dict]:
 
 
 def _quote_map_from_seed(candidates: list[str], seed: dict[str, dict]) -> dict[str, dict]:
+    """用种子行情（热门榜/预筛结果）补齐候选股的报价字段，缺失填 0，行业与 PE/PB 留空。
+    """
     result: dict[str, dict] = {}
     for code in candidates:
         nc = _normalize_code(code)

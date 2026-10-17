@@ -30,6 +30,8 @@ _comments: dict[str, list[dict]] = {}
 
 
 def _atomic_write_json(path: Path, data: Any) -> None:
+    """写 JSON：临时文件 + os.replace 原子替换；失败时清掉临时文件再抛出。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
@@ -45,6 +47,8 @@ def _atomic_write_json(path: Path, data: Any) -> None:
 
 
 def _load_watchlist_from_disk() -> dict[str, str]:
+    """从磁盘读自选表；键统一补零成 6 位，文件缺失或解析失败返回空表。
+    """
     try:
         if _WATCHLIST_FILE.exists():
             data = json.loads(_WATCHLIST_FILE.read_text(encoding="utf-8"))
@@ -55,6 +59,8 @@ def _load_watchlist_from_disk() -> dict[str, str]:
 
 
 def _load_comments_from_disk() -> dict[str, list[dict]]:
+    """从磁盘读笔记表；文件缺失或解析失败返回空表。
+    """
     try:
         if _COMMENTS_FILE.exists():
             return json.loads(_COMMENTS_FILE.read_text(encoding="utf-8"))
@@ -73,6 +79,8 @@ def init_stores() -> None:
 
 
 def get_watchlist_map() -> dict[str, str]:
+    """返回自选表快照（副本，避免外部直接改动内部状态）。
+    """
     with _watchlist_lock:
         return dict(_watchlist)
 
@@ -90,6 +98,8 @@ def watchlist_add(sym: str) -> tuple[str, bool]:
 
 
 def watchlist_remove(sym: str) -> bool:
+    """删除一条自选；原本不存在返回 False 且不落盘。
+    """
     with _watchlist_lock:
         if sym not in _watchlist:
             return False
@@ -99,11 +109,15 @@ def watchlist_remove(sym: str) -> bool:
 
 
 def comments_get(sym: str) -> list[dict]:
+    """取某只股票的笔记列表副本（保持写入顺序）。
+    """
     with _comments_lock:
         return list(_comments.get(sym, []))
 
 
 def comments_add(sym: str, comment: dict) -> None:
+    """追加一条笔记并落盘（不存在该股票时先建空列表）。
+    """
     with _comments_lock:
         if sym not in _comments:
             _comments[sym] = []
@@ -112,6 +126,8 @@ def comments_add(sym: str, comment: dict) -> None:
 
 
 def comments_update(sym: str, comment_id: str, new_content: str, updated_iso: str) -> bool:
+    """按 id 改内容与 updatedAt；找不到返回 False。
+    """
     with _comments_lock:
         items = _comments.get(sym, [])
         for c in items:
@@ -124,6 +140,8 @@ def comments_update(sym: str, comment_id: str, new_content: str, updated_iso: st
 
 
 def comments_delete(sym: str, comment_id: str) -> bool:
+    """按 id 删除笔记；不存在返回 False 且不落盘。
+    """
     with _comments_lock:
         items = _comments.get(sym, [])
         n = len(items)
@@ -136,6 +154,8 @@ def comments_delete(sym: str, comment_id: str) -> bool:
 
 
 def load_settings() -> dict:
+    """读设置；文件缺失或解析失败返回默认值 {"ai_model": "deepseek"}。
+    """
     with _settings_lock:
         try:
             if _SETTINGS_FILE.exists():
@@ -146,11 +166,15 @@ def load_settings() -> dict:
 
 
 def save_settings(s: dict) -> None:
+    """整体覆盖写设置文件（不做字段合并，调用方需先读出再改）。
+    """
     with _settings_lock:
         _atomic_write_json(_SETTINGS_FILE, s)
 
 
 def apply_startup_ai_model() -> None:
+    """启动时把设置里的 ai_model 恢复到 LLM 客户端；失败只记 debug 日志，不影响启动。
+    """
     from ai.llm_client import set_llm_model
 
     try:

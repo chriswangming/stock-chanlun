@@ -8,7 +8,7 @@ from chan.BuySellPoint.BS_Point import CBS_Point
 from chan.ZS.ZS import CZS
 
 
-# newchan 的 CBS_Point 不带置信度（它的 features 里只有 bsp_bi_amp 这类结构量），
+# chan 的 CBS_Point 不带置信度（它的 features 里只有 bsp_bi_amp 这类结构量），
 # 这里给所有买卖点一个中性基准，后续由 divergence / 中枢 / 趋势逐项加减。
 # 若调用方自己在 CBS_Point.features 里塞了 'confidence'，则优先用调用方的。
 DEFAULT_BSP_CONFIDENCE = 0.6
@@ -109,7 +109,7 @@ class StrategyEngine:
     3. 止损/止盈计算
 
     Note:
-        ``signals`` 是 newchan 的买卖点列表（``CBSPointList`` 迭代出来的 ``CBS_Point``）；
+        ``signals`` 是 chan 的买卖点列表（``CBSPointList`` 迭代出来的 ``CBS_Point``）；
         期望按时间升序传入，因为下面到处用 ``[-1]`` 取"最近一个"。
     """
 
@@ -119,6 +119,8 @@ class StrategyEngine:
                  current_level: str,
                  zhongshus: list[CZS],
                  divergence: Optional[dict] = None):
+        """只做入参装配，不含计算：signals/zhongshus 是 chan 库的 CBS_Point/CZS 对象。
+        """
         self.signals = signals
         self.trend = trend
         self.current_price = current_price

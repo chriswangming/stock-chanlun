@@ -1,3 +1,12 @@
+"""
+缠论计算的顶层入口模块：对外只暴露 CChan 一个类。
+
+链路：数据源 -> CKLine_Unit -> CKLine_List（包含处理 -> 分型 -> 笔 -> 线段 -> 中枢 -> 买卖点）。
+
+- lv_list 必须从大级别排到小级别，高级别K线驱动次级别K线的消费与父子挂载。
+- 支持三种喂数方式：构造时自拉数据源、trigger_load 灌内存K线、step_load 逐步回放。
+- 计算结果可整体 pickle 落盘，存取时先断开再重建各级的 pre/next 双向链表。
+"""
 import copy
 import datetime
 import pickle
@@ -35,6 +44,8 @@ class CChan:
         autype: AUTYPE = AUTYPE.QFQ,
     ):
         """
+        初始化一只标的的缠论计算并立刻算完（非回放模式下）。
+
         Args:
             code: 标的代码，格式由数据源类决定（如 "sz.000001" / "HK.00700"）
             begin_time: 起始时间；datetime.date 会被转成字符串，None 表示不限
@@ -296,6 +307,9 @@ class CChan:
 
         Raises:
             CChanException: 无法识别的数据源类型（ErrCode.SRC_DATA_TYPE_ERR）
+
+        Note:
+            自定义数据源按 "DataAPI.{包名}" 做绝对导入，因此 backend 目录需要在 sys.path 里。
         """
         _dict = {}
         if self.data_src == DATA_SRC.BAO_STOCK:
@@ -326,7 +340,9 @@ class CChan:
             CChanException: 最高级别一根数据都没取到（ErrCode.NO_DATA）
 
         Note:
-            无论中途是否抛错，最后都会调用数据源的 do_close() 释放连接。
+            这是个生成器，调用方必须迭代它计算才会真正发生（__init__ 里就是 `for _ in self.load()`）。
+            数据源实例化成功之后，无论中途是否抛错都会调它的 do_close() 释放连接；
+            但 GetStockAPI() 自身失败（如 ErrCode.SRC_DATA_TYPE_ERR）发生在 try 之外，不会走到 finally。
         """
         stockapi_cls = self.GetStockAPI()
         try:

@@ -1,11 +1,13 @@
-# 单根（未经包含关系处理的）K线单元 CKLine_Unit，简称 KLU，是整条缠论计算链路的最底层。
-#
-# 链路位置：数据源 -> CKLine_Unit -> CKLine（若干根 KLU 合并成一根 KLC）-> CKLine_List（某级别整段序列，含笔/线段/中枢容器）。
-#
-# KLU 之间靠三组指针表达关系：
-#   pre / next    ：同一级别相邻 KLU 的双向链表（由 set_pre_klu 建立，pickle 存取时会断开重建）
-#   sup_kl/sub_kl_list：父级别 KLU / 次级别 KLU 列表，跨级别的包含关系
-#   __klc         ：反向指针，指向"我被合并进了哪根 CKLine"
+"""
+单根（未经包含关系处理的）K线单元 CKLine_Unit（简称 KLU），整条缠论计算链路的最底层。
+
+链路位置：数据源 -> CKLine_Unit -> CKLine（若干根 KLU 合并成一根 KLC）-> CKLine_List（某级别整段序列，含笔/线段/中枢容器）。
+
+KLU 之间靠三组指针表达关系：
+    pre / next         ：同一级别相邻 KLU 的双向链表（由 set_pre_klu 建立，pickle 存取时会断开重建）
+    sup_kl/sub_kl_list ：父级别 KLU / 次级别 KLU 列表，跨级别的包含关系
+    __klc              ：反向指针，指向"我被合并进了哪根 CKLine"
+"""
 import copy
 from typing import Dict, Optional
 
@@ -32,6 +34,8 @@ class CKLine_Unit:
 
     def __init__(self, kl_dict, autofix=False):
         """
+        用数据源给的一行行情 dict 造出一根K线。
+
         Args:
             kl_dict: 至少包含 FIELD_TIME/FIELD_OPEN/FIELD_CLOSE/FIELD_HIGH/FIELD_LOW 的 dict
             autofix: True 时把不合规的 high/low 自动掰回去，False 时直接抛异常
@@ -123,9 +127,6 @@ class CKLine_Unit:
         """
         反向取到自己所属的那根合并K线 CKLine。
 
-        Returns:
-            CKLine
-
         Raises:
             AssertionError: 该 KLU 还没被任何 CKLine 收纳（__klc 仍为 None）
         """
@@ -148,12 +149,7 @@ class CKLine_Unit:
 
     @property
     def idx(self):
-        """
-        本K线在本级别里的顺序下标。
-
-        Returns:
-            int: 从 0 开始递增；-1 表示尚未分配
-        """
+        """本K线在本级别里的顺序下标：从 0 开始递增，-1 表示尚未分配。"""
         return self.__idx
 
     def set_idx(self, idx):
@@ -171,8 +167,7 @@ class CKLine_Unit:
 
     def __str__(self):
         """
-        Returns:
-            str: "idx:时间/级别 open=.. close=.. high=.. low=.. 成交信息" 的一行摘要
+        调试输出一行摘要："idx:时间/级别 open=.. close=.. high=.. low=.. 成交信息"。
         """
         return f"{self.idx}:{self.time}/{self.kl_type} open={self.open} close={self.close} high={self.high} low={self.low} {self.trade_info}"
 
@@ -231,29 +226,15 @@ class CKLine_Unit:
         self.sup_kl = parent
 
     def get_children(self):
-        """
-        Yields:
-            CKLine_Unit: 本K线对应的所有次级别K线，按加入顺序
-        """
+        """依次产出本K线对应的所有次级别K线（按加入顺序）。"""
         yield from self.sub_kl_list
 
     def _low(self):
-        """
-        统一取值接口：Bi/Seg 等上层元素同样实现了 _low/_high，
-        这样"取区间最低价"之类的逻辑（如中枢判定）不必关心对象的类型。
-
-        Returns:
-            float: 本K线最低价
-        """
+        """返回最低价；与 CBi/CSeg 的 _low 同签名，供中枢等逻辑统一取值。"""
         return self.low
 
     def _high(self):
-        """
-        同 _low，返回本K线最高价。
-
-        Returns:
-            float: 本K线最高价
-        """
+        """返回最高价；与 CBi/CSeg 的 _high 同签名，供中枢等逻辑统一取值。"""
         return self.high
 
     def set_metric(self, metric_model_lst: list) -> None:

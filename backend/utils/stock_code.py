@@ -9,13 +9,13 @@
     sz002384      部分行情源 / 爬虫返回
     002384.SZ     新浪 / 雪球 / 聚宽风格：代码在前，市场在后缀
 
-``newchan`` 里的 ``CBaoStock`` **原样透传** ``self.code`` 给 baostock，不做任何归一化。
+``chan`` 里的 ``CBaoStock`` **原样透传** ``self.code`` 给 baostock，不做任何归一化。
 所以只要传进去的不是 9 位格式，就会在 ``query_stock_basic`` 阶段报::
 
     CChanException: baostock 查询002384基本信息失败: 股票代码应为9位，请检查。格式示例：sh.600000
 
 本模块就是这层「入口适配」，在 **路由层** 把用户传的任意写法转成 baostock 格式，
-从而不动 ``newchan``（它是 chan.py 的 vendored 拷贝，改内部逻辑会让以后同步时对不上）。
+归一化因此统一收在本模块与路由层完成，不写进 ``chan`` 的数据源内部。
 
 设计取舍:
 

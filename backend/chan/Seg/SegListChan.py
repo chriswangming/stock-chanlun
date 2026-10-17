@@ -29,23 +29,16 @@ class CSegListChan(CSegListComm):
     """
 
     def __init__(self, seg_config=CSegConfig(), lv=SEG_TYPE.BI):
-        """
-        Args:
-            seg_config: 线段配置 CSegConfig
-            lv: 层级语义（SEG_TYPE.BI / SEG_TYPE.SEG）
-        """
+        """按线段配置与层级语义构造特征序列法的线段列表。"""
         super(CSegListChan, self).__init__(seg_config=seg_config, lv=lv)
 
     def do_init(self):
-        # 删除末尾不确定的线段
-        """
-        重算前的清理：把尾部未确认的线段全部撤掉，让它们有机会被重新算出来。
+        """重算前的清理：把尾部未确认的线段撤掉，让它们有机会被重新算出来。
 
-        Note:
-            除了未确认线段，最后一条确认线段也可能要撤掉：
-            如果判定它的那个特征序列的第三元素里含有未确认笔，
-            那么这条线段的端点其实还可能变动，必须先撤掉重算。
-            撤掉时要把段内笔的 parent_seg 反向指针一并清掉。
+        要点：
+        - 最后一条确认线段也可能要撤：判定它的那个特征序列的第三元素里若含有未确认笔，
+          这条线段的端点其实还可能变动，必须先撤掉重算
+        - 撤掉线段时要把段内笔的 parent_seg 反向指针一并清掉
         """
         while len(self) and not self.lst[-1].is_sure:
             _seg = self[-1]
@@ -62,15 +55,11 @@ class CSegListChan(CSegListComm):
                 self.lst.pop()
 
     def update(self, bi_lst: CBiList):
-        """
-        重算线段列表（对基类的抽象方法 update 的实现）。
+        """重算线段列表（特征序列法对基类 update 的实现）。
 
-        Args:
-            bi_lst: 本次参与计算的笔列表
-
-        Note:
-            因为有补收尾兜底（collect_left_seg），这里可以放心地只从
-            "上一条确认线段的终点笔"之后开始扫描，之前的线段都不必重算。
+        要点：
+        - 因为有补收尾兜底（collect_left_seg），可以放心只从"上一条确认线段的终点笔"之后开始扫描
+        - 还没有任何线段时从第 0 根笔开始
         """
         self.do_init()
         if len(self) == 0:
@@ -80,19 +69,15 @@ class CSegListChan(CSegListComm):
         self.collect_left_seg(bi_lst)
 
     def cal_seg_sure(self, bi_lst: CBiList, begin_idx: int):
-        """
-        用两个特征序列容器同时推进，直到有线段被确定出来。
+        """用两个方向的特征序列容器并行推进，直到有线段被确定出来。
 
-        Args:
-            bi_lst: 完整的笔列表
-            begin_idx: 从哪一根笔开始扫描
-
-        Note:
-            两个容器的分工（这是缠论特征序列法的标准约定）：
-                up_eigen   ：装向下笔，它出现顶分型 => 一条上升线段结束；
-                down_eigen ：装向上笔，它出现底分型 => 一条下降线段结束。
-            两个容器是并行推进的，谁先走出分型谁就先产出线段；
-            第一段方向未知时两边都喂，等证据够了再决定方向（见下面那段分支）。
+        要点：
+        - 两个容器的分工（缠论特征序列法的标准约定）：
+          up_eigen 装向下笔、出现顶分型 => 上升线段结束；
+          down_eigen 装向上笔、出现底分型 => 下降线段结束
+        - 只把笔喂给"当前方向之外的那个容器"：上一条线段向上时，接下来要找的是下降线段
+        - 两个容器并行推进，谁先走出分型谁先产出线段
+        - 第一段方向未知时两边都喂，等证据够了再定方向（见下面那段分支）
         """
         up_eigen = CEigenFX(BI_DIR.UP, lv=self.lv)  # 上升线段下降笔
         down_eigen = CEigenFX(BI_DIR.DOWN, lv=self.lv)  # 下降线段上升笔
@@ -127,18 +112,14 @@ class CSegListChan(CSegListComm):
                 break
 
     def treat_fx_eigen(self, fx_eigen, bi_lst: CBiList):
-        """
-        处理一个已经成型的特征序列分型：据此切出一条线段。
+        """处理一个已经成型的特征序列分型：据此切出一条线段。
 
-        Args:
-            fx_eigen: 已经判定出分型的那个特征序列容器
-            bi_lst: 完整的笔列表
-
-        Note:
-            can_be_end 的返回值三态：
-                True  -> 分型成立（且若有缺口，后面也确实找到了反向分型），线段确认；
-                None  -> 分型成立但后面还没走出反向分型，只能算未确认线段；
-                False -> 分型不算数，要从它的第二元素所在位置重算。
+        要点：
+        - can_be_end 的返回值三态：True 分型成立（有缺口时后面也确实找到了反向分型）=> 线段确认；
+          None 分型成立但后面还没走出反向分型 => 只能算未确认线段；
+          False 分型不算数 => 从它的第二元素所在位置重算
+        - 线段是否确认还要看构成它的笔是否都已确认（all_bi_is_sure）
+        - 首条线段方向/首尾值异常被 add_new_seg 吞掉时（返回 False），从该笔之后重新来过
         """
         _test = fx_eigen.can_be_end(bi_lst)
         end_bi_idx = fx_eigen.GetPeakBiIdx()

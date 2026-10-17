@@ -1,18 +1,17 @@
 """
-中枢的配置模块：CZSConfig。
+中枢的配置模块：CZSConfig，决定中枢"怎么构造、要不要合并"。
 
-它决定中枢"怎么构造、要不要合并"。
+链路位置：原始K线 -> 包含合并 -> 分型 -> 笔 -> 线段 -> 中枢（规则由本配置控制） -> 买卖点
 
-链路位置：
-    原始K线 -> 包含合并 -> 分型 -> 笔 -> 线段 -> 中枢（规则由本配置控制） -> 买卖点
-
-Note:
-    本模块没有任何计算逻辑，只是原样保存 ChanConfig 里传进来的几个开关。
+要点：
+- 本模块没有任何计算逻辑，只是原样保存 ChanConfig 里传进来的几个开关。
+- 开关由 ZS/ZSList.py 消费：need_combine 与 zs_combine_mode 用于中枢合并，
+  one_bi_zs 用于是否允许一笔中枢，zs_algo 决定构造模式。
 """
 
 class CZSConfig:
     """
-    中枢的配置项集合。
+    中枢的配置项集合，四个开关原样保存：
 
         need_combine   ：新中枢成型后是否尝试与前一个中枢合并
         zs_combine_mode：合并口径，'zs' 按中枢区间重叠、'peak' 按极值区间重叠
@@ -21,13 +20,7 @@ class CZSConfig:
     """
 
     def __init__(self, need_combine=True, zs_combine_mode="zs", one_bi_zs=False, zs_algo="normal"):
-        """
-        Args:
-            need_combine: 是否开启中枢合并
-            zs_combine_mode: 合并口径，'zs' 或 'peak'
-            one_bi_zs: 是否允许一笔中枢
-            zs_algo: 构造模式，'normal' / 'over_seg' / 'auto'
-        """
+        """依次是：是否开启中枢合并、合并口径（'zs'/'peak'）、是否允许一笔中枢、构造模式。"""
         self.need_combine = need_combine
         self.zs_combine_mode = zs_combine_mode
         self.one_bi_zs = one_bi_zs

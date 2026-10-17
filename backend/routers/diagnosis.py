@@ -1,3 +1,17 @@
+"""
+【已停用】AI 诊股路由 — 当前整文件为注释状态，main.py 中也没有挂载。
+
+停用前的职责：把缠论数据喂给 LLM，以 SSE 流式返回回答。
+
+SSE 协议（三帧）：
+    1. `: stream-open\n\n`                        注释帧，先让浏览器/网关建立连接
+    2. `data: {"token": "..."}\n\n`               逐 token 正文帧
+    3. `data: {"done": true, "full": "..."}\n\n`  结束帧（含完整文本）
+
+出错时发 `data: {"error": "..."}` 帧而不是断开连接，前端可原地提示。
+两个模型的差异：DeepSeek 用共享 httpx.AsyncClient 原生流式读 SSE；
+Gemini 官方客户端是同步的，只能 asyncio.to_thread 丢线程池。
+"""
 # """AI 诊股路由：把缠论数据喂给 LLM，以 SSE 流式返回回答。
 
 # 协议约定（三帧）：

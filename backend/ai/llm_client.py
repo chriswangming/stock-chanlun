@@ -14,6 +14,8 @@ _llm_http_lock = threading.RLock()
 
 
 def _get_llm_http_client() -> httpx.Client:
+    """全局共用一个 httpx.Client（60s 超时）以复用连接池；懒创建 + 加锁，线程安全。
+    """
     global _llm_http_client
     with _llm_http_lock:
         if _llm_http_client is None:
@@ -30,11 +32,15 @@ class LLMClient:
     """
 
     def __init__(self, model: str = "deepseek"):
+        """model 只是个名字，chat() 时按前缀 deepseek/gemini 决定走哪个厂商。
+        """
         self.model = model
 
     # ── DeepSeek ───────────────────────────────────────────────────────────────
 
     def _deepseek(self, messages: list[dict], **kwargs) -> str:
+        """调 DeepSeek chat/completions；没配 DEEPSEEK_API_KEY 直接抛错，不做静默降级。
+        """
         key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
         if not key:
             raise ValueError("DEEPSEEK_API_KEY 未设置，请检查 .env 文件")
@@ -60,6 +66,13 @@ class LLMClient:
     # ── Gemini ─────────────────────────────────────────────────────────────────
 
     def _gemini(self, messages: list[dict], **kwargs) -> str:
+        """调 Gemini generateContent。
+        
+        要点：
+        - system 消息要单独塞进 systemInstruction，正文只留 user/model 交替
+        - 密钥走 x-goog-api-key 请求头而非 URL 参数，避免被代理/日志/异常信息捕获
+        - 未收录的模型名一律回落 gemini-2.0-flash
+        """
         key = os.environ.get("GEMINI_API_KEY", "").strip()
         if not key:
             raise ValueError("GEMINI_API_KEY 未设置，请检查 .env 文件")
@@ -133,6 +146,8 @@ _llm_client_lock = threading.RLock()
 
 
 def get_llm_client(model: Optional[str] = None) -> LLMClient:
+    """取全局单例；传入的 model 与当前不同时才重建客户端，不传则沿用（首次默认 deepseek）。
+    """
     global _current_model, _llm_client
     with _llm_client_lock:
         if model and model != _current_model:
@@ -145,6 +160,8 @@ def get_llm_client(model: Optional[str] = None) -> LLMClient:
 
 
 def set_llm_model(model: str):
+    """切换全局模型：直接重建客户端，下次 get_llm_client() 拿到新的。
+    """
     global _current_model, _llm_client
     with _llm_client_lock:
         _llm_client = LLMClient(model=model)

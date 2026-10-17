@@ -1,11 +1,13 @@
-# 某一级别的完整K线序列 CKLine_List：合并K线列表 + 笔/线段/线段段 + 各类中枢 + 买卖点容器。
-#
-# 链路位置：CKLine_Unit -> CKLine -> CKLine_List，
-# CChan 每从数据源拿到一根该级别的 KLU 就调 add_single_klu 做增量推进（包含处理 -> 分型 -> 笔 -> 线段 -> 中枢），
-# 全部数据喂完（或回放模式下每根K线）再调 cal_seg_and_zs 统一结算线段/中枢/买卖点。
-#
-# 文件底部的两个模块级函数 cal_seg / update_zs_in_seg 是"由下层元素序列算上层元素"的通用工具，
-# 在 (笔 -> 线段) 和 (线段 -> 线段段) 两个层级上各被调用一次，逻辑完全同构。
+"""
+某一级别的完整K线序列 CKLine_List：合并K线列表 + 笔/线段/线段段 + 各类中枢 + 买卖点容器。
+
+链路位置：CKLine_Unit -> CKLine -> CKLine_List，
+CChan 每拿到一根该级别的 KLU 就调 add_single_klu 做增量推进（包含处理 -> 分型 -> 笔 -> 线段 -> 中枢），
+全部数据喂完（或回放模式下每根K线）再调 cal_seg_and_zs 统一结算线段/中枢/买卖点。
+
+文件底部的两个模块级函数 cal_seg / update_zs_in_seg 是"由下层元素序列算上层元素"的通用工具，
+在 (笔 -> 线段) 和 (线段 -> 线段段) 两个层级上各被调用一次，逻辑完全同构。
+"""
 import copy
 from typing import List, Union, overload
 
@@ -46,14 +48,14 @@ def get_seglist_instance(seg_config: CSegConfig, lv) -> CSegListComm:
     if seg_config.seg_algo == "chan":
         from ..Seg.SegListChan import CSegListChan
         return CSegListChan(seg_config, lv)
-    # elif seg_config.seg_algo == "1+1":
-    #     print(f'Please avoid using seg_algo={seg_config.seg_algo} as it is deprecated and no longer maintained.')
-    #     from Seg.SegListDYH import CSegListDYH
-    #     return CSegListDYH(seg_config, lv)
-    # elif seg_config.seg_algo == "break":
-    #     print(f'Please avoid using seg_algo={seg_config.seg_algo} as it is deprecated and no longer maintained.')
-    #     from Seg.SegListDef import CSegListDef
-    #     return CSegListDef(seg_config, lv)
+    elif seg_config.seg_algo == "1+1":
+        print(f'Please avoid using seg_algo={seg_config.seg_algo} as it is deprecated and no longer maintained.')
+        from Seg.SegListDYH import CSegListDYH
+        return CSegListDYH(seg_config, lv)
+    elif seg_config.seg_algo == "break":
+        print(f'Please avoid using seg_algo={seg_config.seg_algo} as it is deprecated and no longer maintained.')
+        from Seg.SegListDef import CSegListDef
+        return CSegListDef(seg_config, lv)
     else:
         raise CChanException(f"unsupport seg algoright:{seg_config.seg_algo}", ErrCode.PARA_ERROR)
 
@@ -76,6 +78,8 @@ class CKLine_List:
 
     def __init__(self, kl_type, conf: CChanConfig):
         """
+        建出一个级别的空容器（含笔/线段/中枢/买卖点各层与指标算子），不算任何东西。
+
         Args:
             kl_type: 本序列对应的级别（KL_TYPE）
             conf: 全局配置 CChanConfig，各级子配置与指标模型都从这里取
@@ -166,10 +170,14 @@ class CKLine_List:
     # 运行时会被最后那个带实现的版本覆盖；实现直接透传到内部 lst，
     # 所以 kl_list[0]（取单根）和 kl_list[0:3]（取一段）都可用。
     @overload
-    def __getitem__(self, index: int) -> CKLine: ...
+    def __getitem__(self, index: int) -> CKLine:
+        """按下标取单根合并K线（仅供类型检查，运行时由下面的实现覆盖）。"""
+        ...
 
     @overload
-    def __getitem__(self, index: slice) -> List[CKLine]: ...
+    def __getitem__(self, index: slice) -> List[CKLine]:
+        """按切片取一段合并K线（仅供类型检查，运行时由下面的实现覆盖）。"""
+        ...
 
     def __getitem__(self, index: Union[slice, int]) -> Union[List[CKLine], CKLine]:
         """
@@ -184,10 +192,7 @@ class CKLine_List:
         return self.lst[index]
 
     def __len__(self):
-        """
-        Returns:
-            int: 本级合并K线的根数（不是原始K线根数）
-        """
+        """返回本级合并K线的根数（不是原始K线根数）。"""
         return len(self.lst)
 
     def cal_seg_and_zs(self):

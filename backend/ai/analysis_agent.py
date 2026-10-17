@@ -15,6 +15,8 @@ def _format_divergence_for_prompt(divergence: dict) -> str:
     }.get(str(force), str(force) if force is not None else "未知")
 
     def _yn(val: object) -> str:
+        """把三态布尔转中文（是/否/未知），None 也算未知。
+        """
         if val is True:
             return "是"
         if val is False:
@@ -125,6 +127,13 @@ def build_analysis_prompt(
 
 
 def parse_llm_response(text: str) -> Optional[dict]:
+    """从 LLM 回复里抠出 JSON 对象。
+    
+    要点：
+    - 优先取 ```json 代码块，退化时取第一个 { 到最后一个 } 之间的内容
+    - 解析失败或结果不是对象都返回 None：调用方据此回退规则引擎信号，
+      绝不能把「观望/0.0」误当成 LLM 的成功结果覆盖掉规则信号
+    """
     m = re.search(r"```(?:json)?\s*({\n.*?})\s*```", text, re.DOTALL)
     if m:
         raw = m.group(1)

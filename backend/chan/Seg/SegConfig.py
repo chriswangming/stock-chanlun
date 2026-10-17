@@ -23,13 +23,11 @@ class CSegConfig:
     """
 
     def __init__(self, seg_algo="chan", left_method="peak"):
-        """
-        Args:
-            seg_algo: 线段算法名，取值 'chan' / '1+1' / 'break'
-            left_method: 补收尾方式，取值 'peak' / 'all'
+        """把配置字符串翻译成内部枚举并做合法性检查。
 
-        Raises:
-            CChanException: left_method 取值不合法（ErrCode.PARA_ERROR）
+        要点：
+        - seg_algo 只原样保存不校验，由 KLine_List 的工厂按需导入对应算法实现
+        - left_method 只认 'all' / 'peak'，其它抛 PARA_ERROR
         """
         self.seg_algo = seg_algo
         if left_method == "all":

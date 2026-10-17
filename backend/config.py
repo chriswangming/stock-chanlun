@@ -13,6 +13,8 @@ except ImportError:
 
 
 def _truthy(name: str, default: bool = False) -> bool:
+    """把环境变量当布尔读：空值走 default，其余只认 1/true/yes/on。
+    """
     v = os.environ.get(name, "").strip().lower()
     if v == "":
         return default
@@ -42,6 +44,8 @@ PORT: int = max(1, min(65535, int(os.environ.get("PORT", "8010") or "8010")))
 
 
 def cors_allow_origins() -> list[str]:
+    """把 CORS_ORIGINS 按逗号拆成列表；配置为空时退回 ["*"]。
+    """
     if CORS_ORIGINS_RAW == "*":
         return ["*"]
     parts = [p.strip() for p in CORS_ORIGINS_RAW.split(",") if p.strip()]
@@ -50,4 +54,6 @@ def cors_allow_origins() -> list[str]:
 
 def cors_allow_credentials() -> bool:
     # Browsers reject credentials with wildcard origins
+    """是否允许浏览器带凭证：通配符源时浏览器会拒绝，所以恒为 False。
+    """
     return cors_allow_origins() != ["*"]

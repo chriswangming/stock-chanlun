@@ -1,14 +1,12 @@
 """
 笔的配置模块：CBiConfig。
 
-它集中存放"能不能成笔"的三条判据的开关，被 Bi/BiList.py 的 can_make_bi 逐条消费。
+链路位置：原始K线 -> 包含合并(CKLine) -> 分型 -> 笔(Bi，规则由本配置控制) -> 线段 -> 中枢 -> 买卖点
 
-链路位置：
-    原始K线 -> 包含合并(CKLine) -> 分型 -> 笔(Bi，规则由本配置控制) -> 线段 -> 中枢 -> 买卖点
-
-Note:
-    本模块只是把 ChanConfig 里那些以字符串/布尔形式给出的配置项，
-    翻译成内部枚举（FX_CHECK_METHOD）并做一次合法性检查，不做任何计算。
+要点：
+- 集中存放"能不能成笔"的开关，被 Bi/BiList.py 的 can_make_bi 逐条消费。
+- 只是把 ChanConfig 里以字符串/布尔形式给出的配置项翻译成内部枚举（FX_CHECK_METHOD）
+  并做一次合法性检查，本身不做任何计算。
 """
 from ..Common.CEnum import FX_CHECK_METHOD
 from ..Common.ChanException import CChanException, ErrCode
@@ -25,6 +23,8 @@ class CBiConfig:
         gap_as_kl       ：跳空缺口是否按K线计入跨度
         bi_end_is_peak  ：笔的终点是否必须是区间真极值
         bi_allow_sub_peak：是否允许"次高点/次低点"式的撤笔延长
+                          （注意：BiList.can_update_peak 在它为 True 时直接返回 False，
+                           即 True 表示关掉这层处理，命名与实际效果相反）
     """
 
     def __init__(
@@ -37,16 +37,10 @@ class CBiConfig:
         bi_allow_sub_peak=True,
     ):
         """
-        Args:
-            bi_algo: 成笔算法名，'fx' 表示只看分型、不检查跨度
-            is_strict: 跨度门槛是否用严格口径
-            bi_fx_check: 分型检查强度，取值 'strict'/'loss'/'half'/'totally'
-            gap_as_kl: 跳空缺口是否折算成K线计入跨度
-            bi_end_is_peak: 是否要求笔的终点是区间极值
-            bi_allow_sub_peak: 是否允许次高点/次低点处理
-
-        Raises:
-            CChanException: bi_fx_check 取值不合法（ErrCode.PARA_ERROR）
+        要点：
+        - bi_fx_check 只接受 'strict'/'loss'/'half'/'totally' 四种字符串，
+          取值不合法时抛 CChanException(ErrCode.PARA_ERROR)。
+        - 其余五个开关原样保存为字符串或布尔值，供 BiList 成笔判定时取用。
         """
         self.bi_algo = bi_algo
         self.is_strict = is_strict

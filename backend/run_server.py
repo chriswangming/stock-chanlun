@@ -1,3 +1,10 @@
+"""
+启动入口：清掉代理环境变量后，用子进程拉起 uvicorn（等价于 `python -m uvicorn main:app`）。
+
+要点：
+- 必须先清空 HTTP(S)_PROXY 并设 NO_PROXY=*，否则本机代理会挡掉行情源的请求
+- 默认端口 8010（Windows 上 8000 常被占用），可用环境变量 PORT 覆盖
+"""
 import os
 import subprocess
 import sys

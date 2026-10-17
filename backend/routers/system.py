@@ -1,3 +1,6 @@
+"""
+系统级路由：/health 健康检查、/api/settings 设置的读写。
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
@@ -26,6 +29,8 @@ router = APIRouter()
 
 @router.get("/health", tags=["系统"])
 def health_check():
+    """健康检查：顺带清理限流器的过期 key，并汇总各缓存/限流器/会话的当前状态。
+    """
     chanlun_global_limiter.prune_stale_keys()
     return {
         "status": "ok",
@@ -53,11 +58,15 @@ def health_check():
 
 @router.get("/api/settings", tags=["系统"])
 def get_settings():
+    """GET 系统设置（目前只有 ai_model）。
+    """
     return load_settings()
 
 
 @router.put("/api/settings", tags=["系统"])
 def update_settings(model: str = Query(..., description="AI 模型 deepseek / gemini")):
+    """PUT 切换 AI 模型：即时生效（重建 LLM 客户端）并落盘持久化；只认 deepseek/gemini。
+    """
     if model not in ("deepseek", "gemini"):
         raise HTTPException(status_code=400, detail="只支持 deepseek 和 gemini")
     set_llm_model(model)

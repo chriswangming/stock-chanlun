@@ -46,12 +46,16 @@ class LRUCache:
     """
 
     def __init__(self, maxsize: int = 128, ttl: float = 300.0):
+        """maxsize 是条目上限，ttl 是过期秒数；内部用 OrderedDict + RLock，线程安全。
+        """
         self._maxsize = maxsize
         self._ttl = ttl
         self._cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
         self._lock = threading.RLock()
 
     def get(self, key: str) -> Optional[Any]:
+        """取值：过期则删并返回 None，命中则移到队尾（表示最近用过）。
+        """
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
@@ -64,6 +68,8 @@ class LRUCache:
             return data
 
     def set(self, key: str, value: Any) -> None:
+        """写入：已存在则刷新到队尾，超出 maxsize 时从队首淘汰最久未用的。
+        """
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
@@ -72,6 +78,8 @@ class LRUCache:
                 self._cache.popitem(last=False)
 
     def clear(self) -> None:
+        """清空全部条目。
+        """
         with self._lock:
             self._cache.clear()
 
@@ -140,8 +148,11 @@ def with_retry(
             return client.get(url)
     """
     def decorator(func: Callable) -> Callable:
+        """造重试装饰器：只捕获 exceptions 指定的异常，其余照常抛出。"""
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            """线性退避（delay*attempt）+ 随机抖动重试；全部失败后重抛最后一次异常。
+            """
             last_exc = None
             for attempt in range(1, max_attempts + 1):
                 try:
@@ -176,6 +187,8 @@ class RateLimiter:
     """
 
     def __init__(self, max_calls: int = 60, window_seconds: float = 60.0):
+        """滑动窗口限流：max_calls 次 / window_seconds 秒，按 key 分别计数。
+        """
         self._max = max_calls
         self._window = window_seconds
         self._counts: dict[str, list[float]] = {}
@@ -250,6 +263,8 @@ class RateLimiter:
             self._counts.pop(key, None)
 
     def tracked_key_count(self) -> int:
+        """当前被计数的 key 数量（用于观测限流器内存占用，需配合 prune_stale_keys 使用）。
+        """
         with self._lock:
             return len(self._counts)
 

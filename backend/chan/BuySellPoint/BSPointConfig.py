@@ -11,8 +11,9 @@ Note:
     - 配置的默认值来自 ChanConfig.set_bsp_config：先铺一份默认参数表，
       再用 conf 里带 "-buy"/"-sell"/"-segbuy"/"-segsell"/"-seg" 后缀的键做定向覆盖，
       最后统一调 parse_target_type() 把 "1,2,3a" 这类字符串解析成 BSP_TYPE 列表。
-    - 笔级买卖点用 bs_point_conf，线段级买卖点用 seg_bs_point_conf；
-      后者默认把 macd_algo 改成 slope、bsp1_only_multibi_zs 改成 False（线段没法算MACD面积）。
+    - 笔级买卖点用 bs_point_conf，线段级买卖点用 seg_bs_point_conf；后者在默认表之上再覆写两项：
+      macd_algo 改成 slope（线段跨度大，斜率比峰值稳）、bsp1_only_multibi_zs 改成 False
+      （线段级别允许单笔中枢出1买）。
     - 参数的实际消费方是 BuySellPoint/BSPointList.py 与 ZS/ZS.py（背驰判定）。
 """
 from typing import Dict, List, Optional
@@ -31,34 +32,45 @@ class CBSPointConfig:
     """
 
     def __init__(self, **args):
-        """
-        Args:
-            **args: 原样透传给两侧 CPointConfig 的构造参数（见 CPointConfig.__init__）
+        """按同一份入参造出买/卖两套配置。
 
-        Note:
-            这里买/卖共享同一份入参，所以构造阶段两边一定相同；
-            想让两边不同，要在构造之后用 b_conf.set() / s_conf.set() 单独改
-            （ChanConfig.set_bsp_config 就是这么做的）。
+        要点：
+        - 这里买/卖共享入参，构造阶段两边一定相同；要让两边不同得在构造之后
+          用 b_conf.set() / s_conf.set() 单独改（ChanConfig.set_bsp_config 就是这么做的）
         """
         self.b_conf = CPointConfig(**args)
         self.s_conf = CPointConfig(**args)
 
     def GetBSConfig(self, is_buy):
-        """
-        按买卖方向取对应的那份配置。
-
-        Args:
-            is_buy: True 取买点配置，False 取卖点配置
-
-        Returns:
-            CPointConfig: 对应方向的配置对象
-        """
+        """按买卖方向取对应的那份配置（True 取买侧 b_conf，False 取卖侧 s_conf）。"""
         return self.b_conf if is_buy else self.s_conf
 
 
 class CPointConfig:
     """
     单侧（买或卖）的买卖点算法参数集合。
+
+    各项含义（默认值见 ChanConfig.set_bsp_config）：
+        divergence_rate       ：背驰力度比阈值，判据是"出中枢笔力度 / 进中枢笔力度 <= 该值"；
+                                值越小越严格，>100 时 ZS.is_divergence 走"保送"分支：
+                                只要突破中枢就算背驰，完全跳过力度比较。默认 float("inf") 即不限
+        min_zs_cnt            ：1类买卖点要求线段内至少几个中枢，<=0 不做限制。默认 1
+        bsp1_only_multibi_zs  ：统计中枢个数时是否只数"非一笔中枢"，默认 True；
+                                线段级配置被改成 False，因为线段内中枢本来就少
+        max_bs2_rate          ：2类/类二允许的最大回撤比例，取值 (0, 1]，默认 0.9999（几乎不限）；
+                                调小则只认"浅回撤"，例如 0.5 表示回撤不到一半才算
+        macd_algo             ：力度口径（area/peak/full_area/diff/slope/amp/amount/volumn/
+                                amount_avg/volumn_avg/turnrate_avg/rsi），默认 "peak"，见 SetMacdAlgo
+        bs1_peak              ：1类是否要求"出中枢那笔创了这段行情的极值"，默认 True
+        bs_type               ：要算的买卖点类型（逗号分隔字符串或字符串列表），
+                                合法元素只有 '1'/'1p'/'2'/'2s'/'3a'/'3b'，默认六类全开
+        bsp2_follow_1         ：2类是否必须跟在已有1类之后（1类那笔上没有买卖点就不出2类），默认 True
+        bsp3_follow_1         ：3类是否必须跟在已有1类之后，默认 True
+        bsp3_peak             ：T3A 是否额外要求"突破中枢极值"，默认 False
+        bsp2s_follow_2        ：类二是否必须先有2类（2类没成立时是否还往后找类二），默认 False
+        max_bsp2s_lv          ：类二允许的最大层级（第 n 个类二层级为 n），None 表示不限，默认 None
+        strict_bsp3           ：3类是否要求中枢的进/出笔与1类那笔严格相邻，默认 False
+        bsp3a_max_zs_cnt      ：T3A 最多考察下一段里的前几个中枢（>=1），默认 1（只看第一个）
 
     Note:
         构造时只校验两项（max_bs2_rate <= 1、bsp3a_max_zs_cnt >= 1），其余参数都是
@@ -82,39 +94,13 @@ class CPointConfig:
                  strict_bsp3,
                  bsp3a_max_zs_cnt,
                  ):
-        """
-        Args:
-            divergence_rate: 背驰力度比阈值（float，>0）。判据是"出中枢笔力度 / 进中枢笔力度 <= 该值"，
-                值越小越严格（要求出中枢那笔明显乏力），越大越宽松；默认 float("inf") 即基本不限制。
-                配成 >100 时 ZS.is_divergence 会走"保送"分支：只要突破中枢就算背驰，完全跳过力度比较。
-            min_zs_cnt: 1类买卖点要求线段内至少有几个中枢（int）；<=0 表示不做这个限制。默认 1。
-            bsp1_only_multibi_zs: 统计中枢个数时是否只数"非一笔中枢"（bool）。
-                True -> 用 seg.get_multi_bi_zs_cnt()，False -> 直接 len(seg.zs_lst)。默认 True，
-                线段级配置（seg_bs_point_conf）默认被改成 False，因为线段内中枢本来就少。
-            max_bs2_rate: 2类买卖点允许的最大回撤比例 = bsp2笔振幅 / 突破笔振幅，取值 (0, 1]。
-                默认 0.9999（几乎不限制）；调小则只认"浅回撤"，例如 0.5 表示回撤不到一半才算2类。
-            macd_algo: 力度口径（str），决定背驰比较时"力度"怎么算，见 SetMacdAlgo 的取值表。默认 "peak"。
-            bs1_peak: 是否要求1类买卖点"突破中枢的那笔创了这段行情的极值"（bool，对应 CZS.out_bi_is_peak）。
-                默认 True；关掉则允许"出中枢那笔并不是最低/最高点"的1类。
-            bs_type: 需要计算的买卖点类型（逗号分隔字符串如 "1,2,3a"，或元素为字符串的列表）。
-                合法元素只有 '1'/'2'/'3a'/'2s'/'1p'/'3b'，默认六类全开。
-            bsp2_follow_1: 2类买卖点是否必须跟在已有的1类之后（bool）。默认 True，
-                即"1类那笔上不存在买卖点时就不出2类"。
-            bsp3_follow_1: 3类买卖点是否必须跟在已有的1类之后（bool）。默认 True。
-            bsp3_peak: 3A 买卖点是否额外要求"突破中枢极值"（bool，对应 bsp3_break_zspeak）。默认 False。
-            bsp2s_follow_2: "类二买卖点"是否必须先有2类（bool）。默认 False，
-                即 2类没成立时仍会继续往后找类二。
-            max_bsp2s_lv: 类二买卖点允许的最大层级（int 或 None），第 n 个类二的层级是 n（= bias/2）；
-                None 表示不限层数。默认 None。
-            strict_bsp3: 3类买卖点是否要求中枢的进/出笔与1类那笔严格相邻（bool）。默认 False。
-            bsp3a_max_zs_cnt: 3A 最多考察下一段里的前几个中枢（int，>=1）。默认 1（只看第一个中枢）。
+        """保存单侧的买卖点参数，各项取值的含义见类文档。
 
-        Raises:
-            AssertionError: max_bs2_rate > 1，或 bsp3a_max_zs_cnt < 1
-
-        Note:
-            所有参数都能在构造后用 set() 改写，唯一例外是 bs_type：
-            改它之后必须重新调一次 parse_target_type()，否则 target_types 不会更新。
+        要点：
+        - 只做两项校验：max_bs2_rate > 1 或 bsp3a_max_zs_cnt < 1 直接 assert 失败
+          （回撤比例超过1等于不限制、一个中枢都不看则 T3A 永远不会产生，都属配置写错）
+        - bs_type 原样暂存为 tmp_target_types，必须再调 parse_target_type() 才有 target_types
+        - 所有参数都能在构造后用 set() 改写，唯独改了 bs_type 要重新 parse_target_type()
         """
         self.divergence_rate = divergence_rate
         self.min_zs_cnt = min_zs_cnt
@@ -138,15 +124,13 @@ class CPointConfig:
         assert self.bsp3a_max_zs_cnt >= 1
 
     def parse_target_type(self):
-        """
-        把 bs_type（字符串或字符串列表）解析成 BSP_TYPE 枚举列表，写入 target_types。
+        """把 bs_type（逗号分隔字符串或字符串列表）解析成 BSP_TYPE 枚举列表，写入 target_types。
 
-        Raises:
-            AssertionError: 出现了 '1'/'2'/'3a'/'2s'/'1p'/'3b' 以外的类型名
-
-        Note:
-            必须由 ChanConfig 在配置装载完毕后调用一次；在此之前 target_types 一直是空列表，
-            会导致所有类型都被判成"非目标买卖点"（只有1类还会被建出来用于内部串联）。
+        要点：
+        - 先过一遍白名单 '1'/'1p'/'2'/'2s'/'3a'/'3b'，拼错立刻 assert 失败；
+          不校验的话后面会静默地一个买卖点都算不出来
+        - 由 ChanConfig 在所有 set() 之后调用一次；在此之前 target_types 是空列表，
+          所有类型都会被降级成非目标买卖点（1类仍会建出来，只作内部串联用）
         """
         _d: Dict[str, BSP_TYPE] = {x.value: x for x in BSP_TYPE}
         if isinstance(self.tmp_target_types, str):
@@ -157,30 +141,16 @@ class CPointConfig:
         self.target_types = [_d[_type] for _type in self.tmp_target_types]
 
     def SetMacdAlgo(self, macd_algo):
-        """
-        把字符串形式的力度口径翻译成 MACD_ALGO 枚举。
+        """把字符串形式的力度口径翻译成 MACD_ALGO 枚举，写进 self.macd_algo。
 
-        Args:
-            macd_algo: 口径名，取值与含义：
-                area        -> MACD 半面积（从笔的一端累加到柱子变色为止）
-                peak        -> 同色柱峰值（最敏感，默认）
-                full_area   -> 笔区间内所有同色柱面积之和
-                diff        -> 柱高最大值与最小值之差
-                slope       -> 笔的斜率（单位K线上的相对涨幅，线段级买卖点默认用它）
-                amp         -> 笔的涨跌幅（百分比口径，跨价位可比）
-                amount      -> 笔上成交额之和
-                volumn      -> 笔上成交量之和
-                amount_avg  -> 笔上成交额均值
-                volumn_avg  -> 笔上成交量均值
-                turnrate_avg-> 笔上换手率均值
-                rsi         -> 笔上 RSI 极值（向下笔取 10000/min 翻转成"越大越强"）
-
-        Raises:
-            KeyError: 传入了上表以外的名字
-
-        Note:
-            所有口径都约定"值越大表示这笔越有力"，买卖点处才能统一用
-            out_metric/in_metric 做比值比较；不同口径之间不可比。
+        要点：
+        - 取值（值越大表示这笔越有力）：area 半面积（从笔的一端累加到柱子变色为止）/
+          peak 同色柱峰值（最敏感，默认）/ full_area 同色柱面积之和 / diff 柱高极差 /
+          slope 笔斜率（线段级买卖点默认用它）/ amp 笔涨跌幅（跨价位可比）/
+          amount、volumn 成交额与成交量之和 / amount_avg、volumn_avg、turnrate_avg 三项均值 /
+          rsi 笔上 RSI（向下笔已翻转成越大越强）
+        - 所有口径统一"越大越强"是为了让买卖点处能用 out_metric/in_metric 直接比背驰；不同口径间不可比
+        - 传入上表以外的名字会抛 KeyError
         """
         _d = {
             "area": MACD_ALGO.AREA,
@@ -199,22 +169,14 @@ class CPointConfig:
         self.macd_algo = _d[macd_algo]
 
     def set(self, k, v):
-        """
-        改写单个参数（配置装载 / 回测调参的入口）。
+        """改写单个参数（配置装载 / 回测调参的入口）。
 
-        Args:
-            k: 参数名，即 CPointConfig 上的属性名；"macd_algo" 会走专门的翻译分支
-            v: 新值。注意实现是 exec(f"self.{k} = {v}")，所以 v 会被当成"源码字面量"求值：
-                传字符串要自己带引号（ChanConfig 里就是先 f'"{v}"' 再传的），
-                传 float("inf") 会先被 _parse_inf 转成 'float("inf")' 字面量。
-
-        Raises:
-            KeyError: macd_algo 取值非法（由 SetMacdAlgo 抛出）
-            NameError / SyntaxError: v 是没带引号的字符串等非法字面量
-
-        Note:
-            用 exec 而非 setattr 是为了让 "inf"、表达式这类写法也能直接用；
-            代价是键名与值都来自配置且不做白名单校验，前提是配置文件可信。
+        要点：
+        - 实现是 exec(f"self.{k} = {v}")，v 被当成源码字面量求值：传字符串要自带引号，
+          "inf" 会先被 _parse_inf 转成 float("inf")；写成没引号的字符串会抛 NameError/SyntaxError
+        - macd_algo 走 SetMacdAlgo 翻译分支（取值非法时 KeyError），其余参数直接赋值
+        - 用 exec 而非 setattr 是为了让 inf、表达式这类写法也能直接用；
+          代价是键名与值都不做白名单校验，前提是配置文件可信
         """
         v = _parse_inf(v)
         if k == "macd_algo":

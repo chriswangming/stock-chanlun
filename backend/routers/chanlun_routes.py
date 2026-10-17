@@ -78,9 +78,9 @@ async def analyze_chanlun(
 
     Note:
         - 入参 ``code`` 必须先过 :func:`utils.to_baostock_code` 归一化。
-          ``newchan`` 的 ``CBaoStock`` **原样透传** code 给 baostock，不做归一化，
+          ``chan`` 的 ``CBaoStock`` **原样透传** code 给 baostock，不做归一化，
           所以裸 6 位代码会直接报「股票代码应为9位」。归一化放在这一层，
-          不动 vendored 的 ``newchan``。
+          归一化只在路由层做，不写进 ``chan`` 的数据源内部。
         - ``start_date`` 的默认值曾误写成字面量 ``"start_date"``，被原样透传给
           baostock 后触发「日期格式不正确」，而 baostock 参数非法时返回 ``None``，
           最终表现为 ``AttributeError: 'NoneType' object has no attribute
