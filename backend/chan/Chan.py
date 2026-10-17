@@ -9,6 +9,7 @@
 """
 import copy
 import datetime
+import logging
 import pickle
 import sys
 from collections import defaultdict
@@ -23,6 +24,8 @@ from .Common.func_util import check_kltype_order, kltype_lte_day
 from .DataAPI.CommonStockAPI import CCommonStockApi
 from .KLine.KLine_List import CKLine_List
 from .KLine.KLine_Unit import CKLine_Unit
+
+log = logging.getLogger(__name__)
 
 
 class CChan:
@@ -78,11 +81,8 @@ class CChan:
 
         self.kl_misalign_cnt = 0
         self.kl_inconsistent_detail = defaultdict(list)
-
         self.g_kl_iter = defaultdict(list)
-
         self.do_init()
-
         if not config.trigger_step:
             for _ in self.load():
                 ...
@@ -279,7 +279,7 @@ class CChan:
 
         Note:
             捕获到 ErrCode.SRC_DATA_NOT_FOUND 且 conf.auto_skip_illegal_sub_lv=True 时，
-            打印告警并把该级别从 kl_datas 与 lv_list 中剔除，从而支持"级别不齐"的数据源。
+            记一条 warning 日志并把该级别从 kl_datas 与 lv_list 中剔除，从而支持"级别不齐"的数据源。
         """
         # 为了跳过一些获取数据失败的级别
         lv_klu_iter = []
@@ -290,8 +290,7 @@ class CChan:
                 valid_lv_list.append(lv)
             except CChanException as e:
                 if e.errcode == ErrCode.SRC_DATA_NOT_FOUND and self.conf.auto_skip_illegal_sub_lv:
-                    if self.conf.print_warning:
-                        print(f"[WARNING-{self.code}]{lv}级别获取数据失败，跳过")
+                    log.warning("[%s]%s 级别获取数据失败，跳过", self.code, lv)
                     del self.kl_datas[lv]
                     continue
                 raise e
@@ -388,15 +387,11 @@ class CChan:
         Args:
             cur_lv: 目标级别
             kline_unit: 待加入的 CKLine_Unit
-
-        Raises:
-            原样抛出计算过程中的异常；conf.print_err_time=True 时会先打印出错的K线时间。
         """
         try:
             self.kl_datas[cur_lv].add_single_klu(kline_unit)
         except Exception:
-            if self.conf.print_err_time:
-                print(f"[ERROR-{self.code}]在计算{kline_unit.time}K线时发生错误!")
+            log.error("[%s]在计算 %s K线时发生错误！", self.code, kline_unit.time)
             raise
 
     def try_set_klu_idx(self, lv_idx: int, kline_unit: CKLine_Unit):
@@ -484,8 +479,7 @@ class CChan:
            parent_klu.time.month != sub_klu.time.month or \
            parent_klu.time.day != sub_klu.time.day:
             self.kl_inconsistent_detail[str(parent_klu.time)].append(sub_klu.time)
-            if self.conf.print_warning:
-                print(f"[WARNING-{self.code}]父级别时间是{parent_klu.time}，次级别时间却是{sub_klu.time}")
+            log.warning("[%s]父级别时间是 %s，次级别时间却是 %s", self.code, parent_klu.time, sub_klu.time)
             if len(self.kl_inconsistent_detail) >= self.conf.max_kl_inconsistent_cnt:
                 raise CChanException(f"父&子级别K线时间不一致条数超过{self.conf.max_kl_inconsistent_cnt}！！", ErrCode.KL_TIME_INCONSISTENT)
 
@@ -502,8 +496,7 @@ class CChan:
         """
         if self.conf.kl_data_check and len(kline_unit.sub_kl_list) == 0:
             self.kl_misalign_cnt += 1
-            if self.conf.print_warning:
-                print(f"[WARNING-{self.code}]当前{kline_unit.time}没在次级别{self.lv_list[lv_idx+1]}找到K线！！")
+            log.warning("[%s]当前 %s 没在次级别 %s 找到K线！！", self.code, kline_unit.time, self.lv_list[lv_idx + 1])
             if self.kl_misalign_cnt >= self.conf.max_kl_misalgin_cnt:
                 raise CChanException(f"在次级别找不到K线条数超过{self.conf.max_kl_misalgin_cnt}！！", ErrCode.KL_DATA_NOT_ALIGN)
 

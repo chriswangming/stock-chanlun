@@ -86,7 +86,7 @@ def get_watchlist_map() -> dict[str, str]:
 
 
 def watchlist_add(sym: str) -> tuple[str, bool]:
-    """返回 (iso_time, was_new)."""
+    """加入自选：返回 (加入时间的 ISO 串, 本次是否新增)。"""
     from datetime import datetime
 
     with _watchlist_lock:

@@ -89,8 +89,6 @@ class CChanConfig:
         self.max_kl_misalgin_cnt = conf.get("max_kl_misalgin_cnt", 2)
         self.max_kl_inconsistent_cnt = conf.get("max_kl_inconsistent_cnt", 5)
         self.auto_skip_illegal_sub_lv = conf.get("auto_skip_illegal_sub_lv", False)
-        self.print_warning = conf.get("print_warning", True)
-        self.print_err_time = conf.get("print_err_time", True)
 
         # 附加指标：均线周期列表 / 趋势线周期列表；后者每个周期会生成 MAX 与 MIN 两个模型
         self.mean_metrics: List[int] = conf.get("mean_metrics", [])

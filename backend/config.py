@@ -1,4 +1,4 @@
-"""Runtime configuration from environment (loaded before HTTP patches)."""
+"""运行时配置：全部从环境变量读取（须在任何 HTTP 补丁之前加载）。"""
 from __future__ import annotations
 
 import os
@@ -41,6 +41,12 @@ SCREENING_WORKERS: int = max(1, min(32, int(os.environ.get("SCREENING_WORKERS", 
 
 # 后端默认监听端口（run_server.py 与 python main.py 均读取）
 PORT: int = max(1, min(65535, int(os.environ.get("PORT", "8010") or "8010")))
+
+# 日志级别（DEBUG / INFO / WARNING / ERROR），非法值退回 INFO
+LOG_LEVEL: str = (os.environ.get("LOG_LEVEL", "INFO").strip() or "INFO").upper()
+
+# 日志文件路径；置为空字符串（LOG_FILE=）则只输出到控制台
+LOG_FILE: str = os.environ.get("LOG_FILE", "backend.log").strip()
 
 
 def cors_allow_origins() -> list[str]:

@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 
 from ai.llm_client import set_llm_model
@@ -25,6 +27,8 @@ from utils import (
 )
 
 router = APIRouter()
+
+log = logging.getLogger(__name__)
 
 
 @router.get("/health", tags=["系统"])
@@ -69,8 +73,10 @@ def update_settings(model: str = Query(..., description="AI 模型 deepseek / ge
     """
     if model not in ("deepseek", "gemini"):
         raise HTTPException(status_code=400, detail="只支持 deepseek 和 gemini")
-    set_llm_model(model)
     s = load_settings()
+    old = s.get("ai_model")
+    set_llm_model(model)
     s["ai_model"] = model
     save_settings(s)
+    log.info("AI 模型切换：%s -> %s", old, model)
     return {"ai_model": model, "ok": True}

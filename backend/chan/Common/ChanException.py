@@ -13,6 +13,9 @@ Note:
     python3.11 起输出数字 "17"，跨版本打印错误码时需注意。
 """
 from enum import IntEnum
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class ErrCode(IntEnum):
@@ -164,6 +167,9 @@ class CChanException(Exception):
 
 
 if __name__ == "__main__":
+    # 单独跑本文件时没有项目日志配置，挂一个最简控制台输出，保证下面的演示能看见
+    logging.basicConfig(level=logging.INFO, format="%(levelname)-8s | %(message)s")
+
     def foo():
         """演示用：抛出一个带 CONFIG_ERROR 错误码的异常。"""
         raise CChanException("XXX", ErrCode.CONFIG_ERROR)
@@ -171,8 +177,8 @@ if __name__ == "__main__":
     try:
         foo()
     except CChanException as e:
-        print(str(e.errcode))
+        log.info("errcode=%s", str(e.errcode))
         # python3.8 结果为： ErrCode.CONFIG_ERROR
         # python3.11 结果为：17
 
-        print(e.errcode.name, type(e.errcode.name))
+        log.info("%s %s", e.errcode.name, type(e.errcode.name))

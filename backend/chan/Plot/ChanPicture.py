@@ -1,5 +1,5 @@
 """
-chan（chan.py 内核）的**数据出口**：把缠论计算结果摊平成前端可直接消费的 JSON 结构。
+chan（本缠论内核）的**数据出口**：把缠论计算结果摊平成前端可直接消费的 JSON 结构。
 
 ``CChan`` 算完之后，内部是一张互相引用的对象图::
 
@@ -7,7 +7,7 @@ chan（chan.py 内核）的**数据出口**：把缠论计算结果摊平成前�
                                                                    └─> 买卖点 BSP
 
 前端「画K线图」的面板（``components/Chart/KLineChart.vue``）只认扁平数组，
-不该去反查这些对象关系；跨项目比对（stock-chanlun ↔ chan.py）也需要一份
+不该去反查这些对象关系；跨模块比对（缠论内核 ↔ 前端）也需要一份
 稳定、可逐项 diff 的中间产物。本模块就负责这层「摊平」。
 
 三条硬约定（与前端 ``api/stock.ts`` 的 ``ChanlunResult`` 对齐）:
@@ -487,7 +487,7 @@ def _bsp_confidence(bsp_meta: CBS_Point_meta) -> float:
     """
     估算买卖点置信度（**纯启发式，不是校准过的概率**）。
 
-    chan.py 的 ``CBS_Point`` 本身不带置信度，只有一堆特征；而前端
+    ``CBS_Point`` 本身不带置信度，只有一堆特征；而前端
     ``Signal.confidence`` 是必填字段。这里的做法是：
 
         基线（按主类型：1类 0.75 / 2类 0.70 / 3类 0.65）
@@ -803,7 +803,7 @@ def get_plot_lv_data(
         # ── 元信息 ──
         "stock_code": stock_code if stock_code is not None else "",
         "level": lv,
-        # 实际K线周期：chan.py 的 1min 级别实际取 5 分钟数据，这里照样标注出来
+        # 实际K线周期：1min 级别实际取 5 分钟数据，这里照样标注出来
         "data_period": "5min" if lv == "1min" else lv,
         "trend": trend,
         "summary": summary,
@@ -831,7 +831,7 @@ def get_plot_lv_data(
         },
         # ── 副图指标（与 klines 等长同序）──
         "indicators": indicators,
-        # 线段的线段（chan.py 的 segseg），前端暂无对应面板，先一并带出备查
+        # 线段的线段（segseg），前端暂无对应面板，先一并带出备查
         "segsegs": segsegs,
     }
 

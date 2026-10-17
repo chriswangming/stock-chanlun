@@ -1,1 +1,1 @@
-"""Process-local persistence (JSON files, single-node)."""
+"""进程内持久化层：本地 JSON 文件，仅适用单节点。"""

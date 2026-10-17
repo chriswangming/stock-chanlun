@@ -4,12 +4,22 @@ FastAPI 后端入口（路由已拆至 routers/）。
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 # 1) 环境变量
 import config  # noqa: F401
 
-# 2) 必须在任何 akshare/requests 金融请求之前加载
+# 2) 日志装配：uvicorn 是独立进程，必须自己装配一次，否则各模块的 logger
+#    没有 handler，INFO 全被丢掉、WARNING+ 只会走 stderr 的兜底输出
+from utils.log import setup_logging
+
+setup_logging(
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+    log_file=config.LOG_FILE or None,
+)
+
+# 3) 必须在任何 akshare/requests 金融请求之前加载
 import http_adapter_patch  # noqa: F401
 
 from fastapi import FastAPI
@@ -30,10 +40,14 @@ from utils import (
 )
 
 
+log = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """启动时恢复 AI 模型并清理各缓存的过期项；yield 之后（关停）不做额外处理。
     """
+    log.info("服务启动：%s v%s", _app.title, _app.version)
     apply_startup_ai_model()
     chanlun_cache.purge_expired()
     chanlun_multi_cache.purge_expired()
@@ -44,6 +58,7 @@ async def lifespan(_app: FastAPI):
     sector_board_cache.purge_expired()
     stock_news_cache.purge_expired()
     yield
+    log.info("服务关闭")
 
 
 app = FastAPI(

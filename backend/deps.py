@@ -1,4 +1,4 @@
-"""FastAPI dependencies: client IP and rate-limit guards."""
+"""FastAPI 依赖：客户端 IP 识别与限流守卫。"""
 from __future__ import annotations
 
 from fastapi import HTTPException, Request

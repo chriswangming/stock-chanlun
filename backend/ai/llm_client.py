@@ -1,6 +1,7 @@
 """
 统一 LLM 客户端 — 支持 DeepSeek 和 Gemini，自动降级
 """
+import logging
 import os
 import threading
 
@@ -8,6 +9,8 @@ import httpx
 from typing import Optional
 
 from config import DEEPSEEK_MODEL_ID
+
+log = logging.getLogger(__name__)
 
 _llm_http_client: httpx.Client | None = None
 _llm_http_lock = threading.RLock()
@@ -133,8 +136,10 @@ class LLMClient:
             else:
                 raise ValueError(f"不支持的模型: {self.model}")
         except httpx.HTTPStatusError as e:
+            log.error("LLM HTTP 错误 %s（model=%s）: %s", e.response.status_code, self.model, e.response.text[:200])
             raise RuntimeError(f"LLM HTTP 错误 {e.response.status_code}: {e.response.text[:200]}")
         except Exception as e:
+            log.error("LLM 调用失败（model=%s）: %s", self.model, e)
             raise RuntimeError(f"LLM 调用失败: {e}")
 
 

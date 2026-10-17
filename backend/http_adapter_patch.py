@@ -1,6 +1,7 @@
 """
-Monkey-patch requests HTTPAdapter.send for finance hosts: no proxy, optional TLS relax.
-Must be imported before any code that triggers requests to eastmoney / tencent quote, etc.
+给行情域名猴子补丁 requests 的 HTTPAdapter.send：不走代理、补默认超时、可关 TLS 校验。
+
+必须在任何会触发 requests 访问东财 / 腾讯行情的代码之前导入，否则补丁不生效。
 """
 from __future__ import annotations
 

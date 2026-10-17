@@ -9,6 +9,7 @@ CChan 每拿到一根该级别的 KLU 就调 add_single_klu 做增量推进（�
 在 (笔 -> 线段) 和 (线段 -> 线段段) 两个层级上各被调用一次，逻辑完全同构。
 """
 import copy
+import logging
 from typing import List, Union, overload
 
 from ..Bi.Bi import CBi
@@ -24,6 +25,8 @@ from ..ZS.ZSList import CZSList
 
 from .KLine import CKLine
 from .KLine_Unit import CKLine_Unit
+
+log = logging.getLogger(__name__)
 
 
 def get_seglist_instance(seg_config: CSegConfig, lv) -> CSegListComm:
@@ -42,18 +45,18 @@ def get_seglist_instance(seg_config: CSegConfig, lv) -> CSegListComm:
         CChanException: seg_algo 无法识别（ErrCode.PARA_ERROR）
 
     Note:
-        1+1 与 break 两种老算法已经不再维护，选择它们会打印告警但仍然返回实例。
+        1+1 与 break 两种老算法已经不再维护，选择它们会记一条 warning 日志但仍然返回实例。
         具体实现类在分支内部 import，避免未被使用的算法把无关依赖拉进来。
     """
     if seg_config.seg_algo == "chan":
         from ..Seg.SegListChan import CSegListChan
         return CSegListChan(seg_config, lv)
     elif seg_config.seg_algo == "1+1":
-        print(f'Please avoid using seg_algo={seg_config.seg_algo} as it is deprecated and no longer maintained.')
+        log.warning("seg_algo=%s 已废弃且不再维护，建议改用 chan", seg_config.seg_algo)
         from Seg.SegListDYH import CSegListDYH
         return CSegListDYH(seg_config, lv)
     elif seg_config.seg_algo == "break":
-        print(f'Please avoid using seg_algo={seg_config.seg_algo} as it is deprecated and no longer maintained.')
+        log.warning("seg_algo=%s 已废弃且不再维护，建议改用 chan", seg_config.seg_algo)
         from Seg.SegListDef import CSegListDef
         return CSegListDef(seg_config, lv)
     else:

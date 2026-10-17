@@ -246,7 +246,7 @@ class CKLine_Combiner(Generic[T]):
         Note:
             从 lst 的**最后一根往前**扫，返回最近一根造出该最高价的元素 ——
             这样笔的端点在"高点被重复触及"时落在更靠后的那根K线上，
-            与 chan.py 的 get_peak_klu 口径一致。
+            与 CKLine.get_peak_klu 口径一致。
 
         Raises:
             CChanException: 找不到等于 self.high 的元素（合并后不应发生，ErrCode.COMBINER_ERR）

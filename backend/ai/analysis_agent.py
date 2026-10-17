@@ -2,8 +2,11 @@
 缠论 + LLM 智能分析 — 将缠论分析结果交给大模型生成策略建议
 """
 import json
+import logging
 import re
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 
 def _format_divergence_for_prompt(divergence: dict) -> str:
@@ -151,7 +154,9 @@ def parse_llm_response(text: str) -> Optional[dict]:
         if isinstance(data, dict):
             return data
         # 解析结果不是对象：返回 None，由调用方回退规则引擎信号并标记 llm.error
+        log.warning("LLM 返回不是 JSON 对象，回退规则引擎：%s", raw[:200])
         return None
     except json.JSONDecodeError:
         # 解析失败同样返回 None，避免把“观望/0.0”当作 LLM 成功结果覆盖规则信号
+        log.warning("LLM 返回无法解析为 JSON，回退规则引擎：%s", raw[:200])
         return None

@@ -46,6 +46,7 @@ DataAPI/CommonStockAPI.py 里 CCommonStockApi 的四条契约。
     「天级别以下时间戳 = 结束时间」的约定天然一致，无需再补一个周期。
 """
 import baostock as bs
+import logging
 
 from ..Common.CEnum import AUTYPE, DATA_FIELD, KL_TYPE
 from ..Common.ChanException import CChanException, ErrCode
@@ -54,6 +55,8 @@ from ..Common.func_util import kltype_lt_day, str2float
 from ..KLine.KLine_Unit import CKLine_Unit
 
 from .CommonStockAPI import CCommonStockApi
+
+log = logging.getLogger(__name__)
 
 
 def create_item_dict(data, column_name):
@@ -302,7 +305,7 @@ class CBaoStock(CCommonStockApi):
         登出 baostock（挂在 CChan.load 的 finally 里，必定执行到）。
 
         Note:
-            登出失败只打印告警不抛异常 —— 到这里取数流程已经结束，
+            登出失败只记 warning 日志不抛异常 —— 到这里取数流程已经结束，
             没必要因为释放资源失败而让整个 CChan.load 报错；
             但无论成功与否都会把 is_connect 置回 None，
             保证下一次 CChan.load 会重新走一遍 do_init 建会话。
@@ -310,7 +313,7 @@ class CBaoStock(CCommonStockApi):
         if cls.is_connect:
             lo = bs.logout()
             if getattr(lo, "error_code", '0') != '0':
-                print(f"[WARNING] baostock 登出失败: {getattr(lo, 'error_msg', lo)}")
+                log.warning("baostock 登出失败: %s", getattr(lo, 'error_msg', lo))
             cls.is_connect = None
 
     def __convert_type(self):

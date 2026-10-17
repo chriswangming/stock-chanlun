@@ -1,13 +1,15 @@
-"""缠论相关 HTTP 路由：单级别分析 / 多级别并行分析 / AI 策略信号。
+"""缠论 HTTP 路由：单级别完整分析（笔 / 线段 / 中枢 / 买卖点 / 支撑压力位）。
 
 本层只做三件事：
 
-    1. 限流（check_chanlun_rate_limits，多级别按级别数扣 token）；
-    2. 参数校验与缓存读写（单级别结果缓存在 core 层，多级别与 AI 信号缓存在这里）；
-    3. 用 asyncio.to_thread 把同步的取数/计算丢线程池，避免阻塞事件循环。
+  1. 限流（check_chanlun_rate_limits）；
+  2. 参数校验与结果缓存（代码归一化走 utils.stock_code、日期走 utils.datetime_fmt、缓存在 utils.chanlun_cache）；
+  3. 用 asyncio.to_thread 把同步的取数与计算丢线程池，避免阻塞事件循环。
 
-业务编排在 core/chanlun_analysis.py，AI 策略编排在本文件的
-build_ai_signal_response()，算法在 chanlun/。
+计算在 chan/：CChan 构造即联网取数并算完，出参序列化由
+chan/Plot/ChanPicture.serialize_chanlun_analysis 完成。
+
+多级别并行分析与 AI 策略信号两个路由目前处于注释状态，尚未开放。
 """
 from __future__ import annotations
 
@@ -103,6 +105,7 @@ async def analyze_chanlun(
 
     # 初始化chan对象
     config = CChanConfig({})  # 缠论计算配置，见后文
+    # config.trigger_step = True
 
     # 注意：CChan 的构造必须包在 try 里 —— 基类 __init__ 末尾会自动调
     # SetBasciInfo() 联网查标的基本信息，代码不存在 / 退市 / 前缀写错
@@ -113,7 +116,7 @@ async def analyze_chanlun(
             begin_time=begin_time,
             end_time=None,
             data_src=DATA_SRC.BAO_STOCK,
-            lv_list=[KL_TYPE.K_DAY],  # 多级别可以从大到小传入
+            lv_list=[KL_TYPE.K_DAY, KL_TYPE.K_60M],  # 多级别可以从大到小传入
             config=config,
             autype=AUTYPE.QFQ
         )

@@ -2,6 +2,7 @@
   "name": "chanstock-screenshots",
   "private": true,
   "type": "module",
+  "description": "README 界面截图工具：用 Playwright 截取 PC 与移动端共 10 个页面，sharp 压缩后输出到 assets/screenshots/。独立子包，避免把 playwright/sharp 塞进前端依赖。运行前需先起后端与前端 npm run dev:screenshots（固定 5188）；首次使用需 npm install && npx playwright install chromium。",
   "scripts": {
     "screenshots": "node capture-readme-screenshots.mjs"
   },
